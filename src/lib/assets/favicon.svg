@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="PlayDota2Win favicon">
+    <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#FFF5F7" />
+            <stop offset="50%" stop-color="#F0E6FF" />
+            <stop offset="100%" stop-color="#E6F0FF" />
+        </linearGradient>
+        <linearGradient id="ear" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#FF9EC7" />
+            <stop offset="100%" stop-color="#FF6B9D" />
+        </linearGradient>
+    </defs>
+    <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bg)" />
+    <rect x="8" y="8" width="112" height="112" rx="24" fill="#FFFFFF" opacity="0.6" />
+
+    <path d="M34 50l10-16c2-3 6-5 10-5h2l-6 20" fill="url(#ear)" />
+    <path d="M94 50l-10-16c-2-3-6-5-10-5h-2l6 20" fill="url(#ear)" />
+
+    <circle cx="64" cy="70" r="30" fill="#FFD6E8" />
+    <circle cx="52" cy="66" r="6" fill="#6B4C9A" />
+    <circle cx="76" cy="66" r="6" fill="#6B4C9A" />
+    <circle cx="50" cy="64" r="2" fill="#FFFFFF" />
+    <circle cx="74" cy="64" r="2" fill="#FFFFFF" />
+    <path d="M64 70c4 0 7 3 7 6 0 4-4 7-7 7s-7-3-7-7c0-3 3-6 7-6z" fill="#FF6B9D" />
+    <path d="M50 78c4 4 10 6 14 6s10-2 14-6" fill="none" stroke="#8B7BA8" stroke-width="3" stroke-linecap="round" />
+    <circle cx="44" cy="74" r="5" fill="#FFB7D5" opacity="0.9" />
+    <circle cx="84" cy="74" r="5" fill="#FFB7D5" opacity="0.9" />
+
+    <path d="M22 96l6-2 2 6-6 2z" fill="#FFE2F1" />
+    <path d="M102 98l6 2-2 6-6-2z" fill="#E9E3FF" />
+</svg>
