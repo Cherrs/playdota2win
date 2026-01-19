@@ -17,7 +17,12 @@ async function saveDownloadList(kv: KVNamespace, list: DownloadList): Promise<vo
 }
 
 // 辅助函数：上传到 R2
-async function uploadToR2(r2: R2Bucket, key: string, data: ArrayBuffer, contentType: string): Promise<string> {
+async function uploadToR2(
+	r2: R2Bucket,
+	key: string,
+	data: ArrayBuffer,
+	contentType: string
+): Promise<string> {
 	await r2.put(key, data, {
 		httpMetadata: { contentType }
 	});
@@ -35,14 +40,18 @@ function getFilenameFromUrl(url: string): string {
 }
 
 // 辅助函数：上传到自定义 S3（使用预签名 URL）
-async function uploadToS3(config: S3Config, data: ArrayBuffer, contentType: string): Promise<string> {
+async function uploadToS3(
+	config: S3Config,
+	data: ArrayBuffer,
+	contentType: string
+): Promise<string> {
 	const presignedUrl = config.presignedUrl;
 	const publicUrl = config.publicUrl;
-	
+
 	if (!presignedUrl || !publicUrl) {
 		throw new Error('S3 presigned URL and public URL are required');
 	}
-	
+
 	const response = await fetch(presignedUrl, {
 		method: 'PUT',
 		headers: {
@@ -50,11 +59,11 @@ async function uploadToS3(config: S3Config, data: ArrayBuffer, contentType: stri
 		},
 		body: data
 	});
-	
+
 	if (!response.ok) {
 		throw new Error(`S3 upload failed: ${response.status}`);
 	}
-	
+
 	return publicUrl;
 }
 
@@ -63,7 +72,9 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const jwtSecret = platform?.env.ADMIN_JWT_SECRET;
@@ -71,9 +82,10 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 		if (!authed) {
 			return json({ success: false, error: 'Unauthorized' } satisfies ApiResponse, { status: 401 });
 		}
-		
+
 		const list = await getDownloadList(kv);
-		const signingSecret = platform?.env.ADMIN_SIGNING_SECRET || platform?.env.ADMIN_PASSWORD || 'dev-secret';
+		const signingSecret =
+			platform?.env.ADMIN_SIGNING_SECRET || platform?.env.ADMIN_PASSWORD || 'dev-secret';
 		const items = await Promise.all(
 			list.items.map(async (item) => {
 				if (item.storageType === 'r2' && item.url.startsWith('/api/admin/download/')) {
@@ -86,7 +98,9 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 		return json({ success: true, data: { ...list, items } } satisfies ApiResponse<DownloadList>);
 	} catch (error) {
 		console.error('Error fetching downloads:', error);
-		return json({ success: false, error: 'Failed to fetch downloads' } satisfies ApiResponse, { status: 500 });
+		return json({ success: false, error: 'Failed to fetch downloads' } satisfies ApiResponse, {
+			status: 500
+		});
 	}
 };
 
@@ -95,9 +109,11 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		const r2 = platform?.env.UPLOADS_BUCKET;
-		
+
 		if (!kv) {
-			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const jwtSecret = platform?.env.ADMIN_JWT_SECRET;
@@ -105,7 +121,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		if (!authed) {
 			return json({ success: false, error: 'Unauthorized' } satisfies ApiResponse, { status: 401 });
 		}
-		
+
 		const formData = await request.formData();
 		const platform_type = formData.get('platform') as string;
 		const title = (formData.get('title') as string) || '';
@@ -114,23 +130,31 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const version = formData.get('version') as string;
 		const size = formData.get('size') as string;
 		const storageType = formData.get('storageType') as 'link' | 'r2' | 's3';
-		
+
 		let url = '';
 		let s3Config: S3Config | undefined;
 		let uploadFilename: string | undefined;
-		
+
 		if (storageType === 'link') {
 			url = formData.get('url') as string;
 			if (!url) {
-				return json({ success: false, error: 'URL is required for link storage' } satisfies ApiResponse, { status: 400 });
+				return json(
+					{ success: false, error: 'URL is required for link storage' } satisfies ApiResponse,
+					{ status: 400 }
+				);
 			}
 		} else if (storageType === 'r2') {
 			if (!r2) {
-				return json({ success: false, error: 'R2 not available' } satisfies ApiResponse, { status: 500 });
+				return json({ success: false, error: 'R2 not available' } satisfies ApiResponse, {
+					status: 500
+				});
 			}
 			const file = formData.get('file') as File;
 			if (!file) {
-				return json({ success: false, error: 'File is required for R2 storage' } satisfies ApiResponse, { status: 400 });
+				return json(
+					{ success: false, error: 'File is required for R2 storage' } satisfies ApiResponse,
+					{ status: 400 }
+				);
 			}
 			uploadFilename = file.name;
 			const key = `${platform_type}/${version}/${file.name}`;
@@ -139,21 +163,25 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		} else if (storageType === 's3') {
 			const file = formData.get('file') as File;
 			const s3ConfigStr = formData.get('s3Config') as string;
-			
+
 			if (!file || !s3ConfigStr) {
-				return json({ success: false, error: 'File and S3 config are required' } satisfies ApiResponse, { status: 400 });
+				return json(
+					{ success: false, error: 'File and S3 config are required' } satisfies ApiResponse,
+					{ status: 400 }
+				);
 			}
-			
+
 			s3Config = JSON.parse(s3ConfigStr) as S3Config;
 			uploadFilename = file.name;
 			const buffer = await file.arrayBuffer();
 			url = await uploadToS3(s3Config, buffer, file.type || 'application/octet-stream');
 		}
-		
-		const resolvedFilename = filename
-			|| uploadFilename
-			|| (storageType === 'link' ? getFilenameFromUrl(url) : undefined)
-			|| undefined;
+
+		const resolvedFilename =
+			filename ||
+			uploadFilename ||
+			(storageType === 'link' ? getFilenameFromUrl(url) : undefined) ||
+			undefined;
 
 		const item: DownloadItem = {
 			id: crypto.randomUUID(),
@@ -170,15 +198,17 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			updatedAt: Date.now(),
 			enabled: true
 		};
-		
+
 		const list = await getDownloadList(kv);
 		list.items.push(item);
 		await saveDownloadList(kv, list);
-		
+
 		return json({ success: true, data: item } satisfies ApiResponse<DownloadItem>);
 	} catch (error) {
 		console.error('Error adding download:', error);
-		return json({ success: false, error: 'Failed to add download' } satisfies ApiResponse, { status: 500 });
+		return json({ success: false, error: 'Failed to add download' } satisfies ApiResponse, {
+			status: 500
+		});
 	}
 };
 
@@ -187,7 +217,9 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const jwtSecret = platform?.env.ADMIN_JWT_SECRET;
@@ -195,31 +227,37 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 		if (!authed) {
 			return json({ success: false, error: 'Unauthorized' } satisfies ApiResponse, { status: 401 });
 		}
-		
-		const body = await request.json() as { id: string; [key: string]: unknown };
+
+		const body = (await request.json()) as { id: string; [key: string]: unknown };
 		const { id, ...updates } = body;
 		if (!id) {
-			return json({ success: false, error: 'ID is required' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: 'ID is required' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
-		
+
 		const list = await getDownloadList(kv);
-		const index = list.items.findIndex(item => item.id === id);
-		
+		const index = list.items.findIndex((item) => item.id === id);
+
 		if (index === -1) {
-			return json({ success: false, error: 'Item not found' } satisfies ApiResponse, { status: 404 });
+			return json({ success: false, error: 'Item not found' } satisfies ApiResponse, {
+				status: 404
+			});
 		}
-		
+
 		list.items[index] = {
 			...list.items[index],
 			...updates,
 			updatedAt: Date.now()
 		};
-		
+
 		await saveDownloadList(kv, list);
 		return json({ success: true, data: list.items[index] } satisfies ApiResponse<DownloadItem>);
 	} catch (error) {
 		console.error('Error updating download:', error);
-		return json({ success: false, error: 'Failed to update download' } satisfies ApiResponse, { status: 500 });
+		return json({ success: false, error: 'Failed to update download' } satisfies ApiResponse, {
+			status: 500
+		});
 	}
 };
 
@@ -228,9 +266,11 @@ export const DELETE: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		const r2 = platform?.env.UPLOADS_BUCKET;
-		
+
 		if (!kv) {
-			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const jwtSecret = platform?.env.ADMIN_JWT_SECRET;
@@ -238,31 +278,37 @@ export const DELETE: RequestHandler = async ({ request, platform }) => {
 		if (!authed) {
 			return json({ success: false, error: 'Unauthorized' } satisfies ApiResponse, { status: 401 });
 		}
-		
-		const { id } = await request.json() as { id: string };
+
+		const { id } = (await request.json()) as { id: string };
 		if (!id) {
-			return json({ success: false, error: 'ID is required' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: 'ID is required' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
-		
+
 		const list = await getDownloadList(kv);
-		const item = list.items.find(item => item.id === id);
-		
+		const item = list.items.find((item) => item.id === id);
+
 		if (!item) {
-			return json({ success: false, error: 'Item not found' } satisfies ApiResponse, { status: 404 });
+			return json({ success: false, error: 'Item not found' } satisfies ApiResponse, {
+				status: 404
+			});
 		}
-		
+
 		// 如果是 R2 存储，删除文件
 		if (item.storageType === 'r2' && r2 && item.url.startsWith('/api/admin/download/')) {
 			const key = item.url.replace('/api/admin/download/', '');
 			await r2.delete(key);
 		}
-		
-		list.items = list.items.filter(item => item.id !== id);
+
+		list.items = list.items.filter((item) => item.id !== id);
 		await saveDownloadList(kv, list);
-		
+
 		return json({ success: true } satisfies ApiResponse);
 	} catch (error) {
 		console.error('Error deleting download:', error);
-		return json({ success: false, error: 'Failed to delete download' } satisfies ApiResponse, { status: 500 });
+		return json({ success: false, error: 'Failed to delete download' } satisfies ApiResponse, {
+			status: 500
+		});
 	}
 };

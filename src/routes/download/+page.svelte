@@ -1,18 +1,25 @@
 <script lang="ts">
 	import type { DownloadItem, DownloadList, ApiResponse, Platform } from '$lib/types';
-	
+
 	let isHovering = $state(false);
 	let downloadCount = $state(0);
 	let downloads = $state<DownloadItem[]>([]);
 	let loading = $state(true);
-	
+
 	// 下载密码
 	let password = $state('');
 	let downloadError = $state('');
 	let downloading = $state(false);
 	let showPasswordModal = $state(false);
 	let pendingItem = $state<DownloadItem | null>(null);
-	
+
+	// Turnstile 状态
+	let requireTurnstile = $state(false);
+	let turnstileSiteKey = $state('');
+	let turnstileToken = $state('');
+	let turnstileWidgetId = $state<string | null>(null);
+	let turnstileLoaded = $state(false);
+
 	// 加载下载列表
 	async function loadDownloads() {
 		try {
@@ -28,21 +35,122 @@
 			loading = false;
 		}
 	}
-	
+
 	function getPlatformLabel(platform: Platform): string {
 		switch (platform) {
-			case 'windows': return 'Windows';
-			case 'macos': return 'macOS';
-			case 'linux': return 'Linux';
-			default: return platform;
+			case 'windows':
+				return 'Windows';
+			case 'macos':
+				return 'macOS';
+			case 'linux':
+				return 'Linux';
+			default:
+				return platform;
 		}
+	}
+
+	// 检查是否需要 Turnstile
+	async function checkTurnstileRequired() {
+		try {
+			const res = await fetch('/api/downloads/link');
+			const data: ApiResponse<{
+				requireTurnstile: boolean;
+				siteKey: string;
+				failureCount: number;
+			}> = await res.json();
+			if (data.success && data.data) {
+				requireTurnstile = data.data.requireTurnstile;
+				turnstileSiteKey = data.data.siteKey;
+				if (requireTurnstile && turnstileSiteKey) {
+					loadTurnstileScript();
+				}
+			}
+		} catch (e) {
+			console.error('Failed to check turnstile status:', e);
+		}
+	}
+
+	// 加载 Turnstile 脚本
+	function loadTurnstileScript() {
+		if (turnstileLoaded || document.querySelector('script[src*="turnstile"]')) {
+			turnstileLoaded = true;
+			renderTurnstile();
+			return;
+		}
+
+		const script = document.createElement('script');
+		script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad';
+		script.async = true;
+
+		(window as unknown as Record<string, () => void>).onTurnstileLoad = () => {
+			turnstileLoaded = true;
+			renderTurnstile();
+		};
+
+		document.head.appendChild(script);
+	}
+
+	// 渲染 Turnstile 小部件
+	function renderTurnstile() {
+		if (!turnstileLoaded || !turnstileSiteKey) return;
+
+		const container = document.getElementById('download-turnstile-container');
+		if (!container) return;
+
+		// 清理旧的 widget
+		if (turnstileWidgetId) {
+			try {
+				(window as unknown as { turnstile: { remove: (id: string) => void } }).turnstile.remove(
+					turnstileWidgetId
+				);
+			} catch {
+				/* ignore */
+			}
+		}
+
+		// 清空容器
+		container.innerHTML = '';
+
+		// 渲染新的 widget
+		turnstileWidgetId = (
+			window as unknown as { turnstile: { render: (el: HTMLElement, opts: unknown) => string } }
+		).turnstile.render(container, {
+			sitekey: turnstileSiteKey,
+			theme: 'light',
+			callback: (token: string) => {
+				turnstileToken = token;
+			},
+			'expired-callback': () => {
+				turnstileToken = '';
+			},
+			'error-callback': () => {
+				turnstileToken = '';
+				downloadError = '人机验证加载失败，请刷新页面重试';
+			}
+		});
+	}
+
+	// 重置 Turnstile
+	function resetTurnstile() {
+		if (turnstileWidgetId && turnstileLoaded) {
+			try {
+				(window as unknown as { turnstile: { reset: (id: string) => void } }).turnstile.reset(
+					turnstileWidgetId
+				);
+			} catch {
+				/* ignore */
+			}
+		}
+		turnstileToken = '';
 	}
 
 	function openPasswordModal(item: DownloadItem) {
 		pendingItem = item;
 		password = '';
 		downloadError = '';
+		turnstileToken = '';
 		showPasswordModal = true;
+		checkTurnstileRequired();
 	}
 
 	function closePasswordModal() {
@@ -50,11 +158,17 @@
 		pendingItem = null;
 		password = '';
 		downloadError = '';
+		turnstileToken = '';
 	}
 
 	async function handleDownloadItem(item: DownloadItem) {
 		if (!password.trim()) {
 			downloadError = '请输入下载密码';
+			return;
+		}
+
+		if (requireTurnstile && !turnstileToken) {
+			downloadError = '请完成人机验证';
 			return;
 		}
 
@@ -64,9 +178,19 @@
 			const res = await fetch('/api/downloads/link', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ itemId: item.id, password })
+				body: JSON.stringify({
+					itemId: item.id,
+					password,
+					turnstileToken: turnstileToken || undefined
+				})
 			});
-			const data: ApiResponse<{ url: string; filename?: string; count?: number }> = await res.json();
+			const data: ApiResponse<{
+				url: string;
+				filename?: string;
+				count?: number;
+				requireTurnstile?: boolean;
+				siteKey?: string;
+			}> = await res.json();
 			if (data.success && data.data?.url) {
 				if (typeof data.data.count === 'number') {
 					downloadCount = data.data.count;
@@ -81,18 +205,33 @@
 				document.body.appendChild(link);
 				link.click();
 				document.body.removeChild(link);
+				closePasswordModal();
 			} else {
 				downloadError = data.error || '获取下载链接失败';
+
+				// 检查是否需要启用 Turnstile
+				if (data.data?.requireTurnstile && data.data?.siteKey) {
+					requireTurnstile = true;
+					turnstileSiteKey = data.data.siteKey;
+					loadTurnstileScript();
+					// 等待 DOM 更新后渲染
+					setTimeout(() => renderTurnstile(), 100);
+				} else if (requireTurnstile) {
+					// 已经有 Turnstile，重置它
+					resetTurnstile();
+				}
 			}
 		} catch (e) {
 			console.error('Failed to get download link:', e);
 			downloadError = '获取下载链接失败';
+			if (requireTurnstile) {
+				resetTurnstile();
+			}
 		} finally {
 			downloading = false;
-			closePasswordModal();
 		}
 	}
-	
+
 	// 初始加载
 	$effect(() => {
 		loadDownloads();
@@ -102,7 +241,10 @@
 <svelte:head>
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-	<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+	<link
+		href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap"
+		rel="stylesheet"
+	/>
 	<title>下载 - PlayDota2Win</title>
 </svelte:head>
 
@@ -121,33 +263,39 @@
 	<main class="main-content">
 		<!-- 可爱的角色/图标区域 -->
 		<div class="mascot-area">
-			<div 
+			<div
 				class="mascot-container"
-				onmouseenter={() => isHovering = true}
-				onmouseleave={() => isHovering = false}
+				onmouseenter={() => (isHovering = true)}
+				onmouseleave={() => (isHovering = false)}
 				role="img"
 				aria-label="可爱的吉祥物"
 			>
 				<div class="mascot" class:bouncing={isHovering}>
 					<svg viewBox="0 0 120 120" class="mascot-svg">
 						<!-- 身体 -->
-						<circle cx="60" cy="65" r="45" fill="#FFE4EC"/>
+						<circle cx="60" cy="65" r="45" fill="#FFE4EC" />
 						<!-- 脸蛋红晕 -->
-						<ellipse cx="30" cy="70" rx="10" ry="6" fill="#FFB6C1" opacity="0.6"/>
-						<ellipse cx="90" cy="70" rx="10" ry="6" fill="#FFB6C1" opacity="0.6"/>
+						<ellipse cx="30" cy="70" rx="10" ry="6" fill="#FFB6C1" opacity="0.6" />
+						<ellipse cx="90" cy="70" rx="10" ry="6" fill="#FFB6C1" opacity="0.6" />
 						<!-- 眼睛 -->
-						<circle cx="42" cy="58" r="8" fill="#2D1B4E"/>
-						<circle cx="78" cy="58" r="8" fill="#2D1B4E"/>
+						<circle cx="42" cy="58" r="8" fill="#2D1B4E" />
+						<circle cx="78" cy="58" r="8" fill="#2D1B4E" />
 						<!-- 眼睛高光 -->
-						<circle cx="45" cy="55" r="3" fill="#FFFFFF"/>
-						<circle cx="81" cy="55" r="3" fill="#FFFFFF"/>
+						<circle cx="45" cy="55" r="3" fill="#FFFFFF" />
+						<circle cx="81" cy="55" r="3" fill="#FFFFFF" />
 						<!-- 微笑 -->
-						<path d="M 48 78 Q 60 88 72 78" stroke="#2D1B4E" stroke-width="3" fill="none" stroke-linecap="round"/>
+						<path
+							d="M 48 78 Q 60 88 72 78"
+							stroke="#2D1B4E"
+							stroke-width="3"
+							fill="none"
+							stroke-linecap="round"
+						/>
 						<!-- 猫耳朵 -->
-						<path d="M 25 30 L 35 55 L 15 50 Z" fill="#FFE4EC"/>
-						<path d="M 95 30 L 85 55 L 105 50 Z" fill="#FFE4EC"/>
-						<path d="M 27 35 L 34 52 L 20 48 Z" fill="#FFB6C1"/>
-						<path d="M 93 35 L 86 52 L 100 48 Z" fill="#FFB6C1"/>
+						<path d="M 25 30 L 35 55 L 15 50 Z" fill="#FFE4EC" />
+						<path d="M 95 30 L 85 55 L 105 50 Z" fill="#FFE4EC" />
+						<path d="M 27 35 L 34 52 L 20 48 Z" fill="#FFB6C1" />
+						<path d="M 93 35 L 86 52 L 100 48 Z" fill="#FFB6C1" />
 					</svg>
 				</div>
 				<div class="sparkles">
@@ -167,7 +315,9 @@
 			<p class="subtitle">下载下载下载</p>
 			<div class="download-stats">
 				<span class="stats-icon">💝</span>
-				<span class="stats-text">已有 <strong>{downloadCount.toLocaleString()}</strong> 位小伙伴下载</span>
+				<span class="stats-text"
+					>已有 <strong>{downloadCount.toLocaleString()}</strong> 位小伙伴下载</span
+				>
 			</div>
 		</div>
 
@@ -178,45 +328,45 @@
 					<div class="spinner"></div>
 					<span>加载中...</span>
 				</div>
+			{:else if downloads.length === 0}
+				<div class="no-downloads">
+					<span>😢</span>
+					<p>暂无可用的下载</p>
+				</div>
 			{:else}
-				{#if downloads.length === 0}
-					<div class="no-downloads">
-						<span>😢</span>
-						<p>暂无可用的下载</p>
-					</div>
-				{:else}
-					<div class="download-list">
-						{#each downloads.filter((item) => item.enabled) as item (item.id)}
-							<div class="download-card">
-								<div class="card-header">
-									<div class="card-platform">
-										<span class="platform-badge">{getPlatformLabel(item.platform)}</span>
-										<span class="storage-badge">{item.storageType.toUpperCase()}</span>
-									</div>
-									<h3 class="card-title">{item.title || `${getPlatformLabel(item.platform)} 版本`}</h3>
+				<div class="download-list">
+					{#each downloads.filter((item) => item.enabled) as item (item.id)}
+						<div class="download-card">
+							<div class="card-header">
+								<div class="card-platform">
+									<span class="platform-badge">{getPlatformLabel(item.platform)}</span>
+									<span class="storage-badge">{item.storageType.toUpperCase()}</span>
 								</div>
-								<div class="card-meta">
-									<span>版本 {item.version}</span>
-									<span>大小 {item.size}</span>
-									{#if item.description}
-										<span class="card-desc">{item.description}</span>
-									{/if}
-									{#if item.filename}
-										<span>文件 {item.filename}</span>
-									{/if}
-								</div>
-								<button
-									class="download-card-btn"
-									onclick={() => openPasswordModal(item)}
-									disabled={downloading}
-								>
-									<span>立即下载</span>
-									<span class="btn-arrow">→</span>
-								</button>
+								<h3 class="card-title">
+									{item.title || `${getPlatformLabel(item.platform)} 版本`}
+								</h3>
 							</div>
-						{/each}
-					</div>
-				{/if}
+							<div class="card-meta">
+								<span>版本 {item.version}</span>
+								<span>大小 {item.size}</span>
+								{#if item.description}
+									<span class="card-desc">{item.description}</span>
+								{/if}
+								{#if item.filename}
+									<span>文件 {item.filename}</span>
+								{/if}
+							</div>
+							<button
+								class="download-card-btn"
+								onclick={() => openPasswordModal(item)}
+								disabled={downloading}
+							>
+								<span>立即下载</span>
+								<span class="btn-arrow">→</span>
+							</button>
+						</div>
+					{/each}
+				</div>
 			{/if}
 		</div>
 
@@ -226,7 +376,8 @@
 					type="button"
 					class="modal-scrim"
 					onclick={closePasswordModal}
-					onkeydown={(e) => (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && closePasswordModal()}
+					onkeydown={(e) =>
+						(e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && closePasswordModal()}
 					aria-label="关闭"
 				></button>
 				<div class="modal-card">
@@ -235,7 +386,9 @@
 						<button class="modal-close" onclick={closePasswordModal}>×</button>
 					</div>
 					{#if pendingItem}
-						<p class="modal-subtitle">{pendingItem.title || `${getPlatformLabel(pendingItem.platform)} 版本`}</p>
+						<p class="modal-subtitle">
+							{pendingItem.title || `${getPlatformLabel(pendingItem.platform)} 版本`}
+						</p>
 					{/if}
 					<div class="auth-form">
 						<input
@@ -245,6 +398,18 @@
 							bind:value={password}
 							disabled={downloading}
 						/>
+
+						{#if requireTurnstile}
+							<div class="turnstile-wrapper">
+								<div id="download-turnstile-container"></div>
+								{#if !turnstileToken}
+									<p class="turnstile-hint">🤖 请完成人机验证</p>
+								{:else}
+									<p class="turnstile-success">✅ 验证通过</p>
+								{/if}
+							</div>
+						{/if}
+
 						{#if downloadError}
 							<p class="auth-error">{downloadError}</p>
 						{/if}
@@ -252,7 +417,7 @@
 					<button
 						class="modal-btn"
 						onclick={() => pendingItem && handleDownloadItem(pendingItem)}
-						disabled={downloading}
+						disabled={downloading || (requireTurnstile && !turnstileToken)}
 					>
 						{#if downloading}
 							<span class="spinner"></span>
@@ -301,7 +466,7 @@
 
 	.page-container {
 		min-height: 100vh;
-		background: linear-gradient(135deg, #FFF5F7 0%, #F0E6FF 50%, #E6F0FF 100%);
+		background: linear-gradient(135deg, #fff5f7 0%, #f0e6ff 50%, #e6f0ff 100%);
 		font-family: 'Nunito', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 		position: relative;
 		overflow-x: hidden;
@@ -321,35 +486,73 @@
 	.floating-star {
 		position: absolute;
 		font-size: 2rem;
-		color: #FFB6C1;
+		color: #ffb6c1;
 		animation: float 6s ease-in-out infinite;
 		opacity: 0.6;
 	}
 
-	.star-1 { top: 10%; left: 10%; animation-delay: 0s; color: #FFD700; }
-	.star-2 { top: 20%; right: 15%; animation-delay: 1s; color: #FF69B4; }
-	.star-3 { bottom: 30%; left: 8%; animation-delay: 2s; color: #DDA0DD; }
-	.star-4 { bottom: 20%; right: 10%; animation-delay: 3s; color: #87CEEB; }
+	.star-1 {
+		top: 10%;
+		left: 10%;
+		animation-delay: 0s;
+		color: #ffd700;
+	}
+	.star-2 {
+		top: 20%;
+		right: 15%;
+		animation-delay: 1s;
+		color: #ff69b4;
+	}
+	.star-3 {
+		bottom: 30%;
+		left: 8%;
+		animation-delay: 2s;
+		color: #dda0dd;
+	}
+	.star-4 {
+		bottom: 20%;
+		right: 10%;
+		animation-delay: 3s;
+		color: #87ceeb;
+	}
 
 	.floating-cloud {
 		position: absolute;
 		font-size: 4rem;
-		color: #FFFFFF;
+		color: #ffffff;
 		opacity: 0.5;
 		animation: drift 20s linear infinite;
 	}
 
-	.cloud-1 { top: 15%; left: -10%; animation-duration: 25s; }
-	.cloud-2 { top: 60%; left: -10%; animation-duration: 30s; animation-delay: 10s; }
+	.cloud-1 {
+		top: 15%;
+		left: -10%;
+		animation-duration: 25s;
+	}
+	.cloud-2 {
+		top: 60%;
+		left: -10%;
+		animation-duration: 30s;
+		animation-delay: 10s;
+	}
 
 	@keyframes float {
-		0%, 100% { transform: translateY(0) rotate(0deg); }
-		50% { transform: translateY(-20px) rotate(10deg); }
+		0%,
+		100% {
+			transform: translateY(0) rotate(0deg);
+		}
+		50% {
+			transform: translateY(-20px) rotate(10deg);
+		}
 	}
 
 	@keyframes drift {
-		from { transform: translateX(-100px); }
-		to { transform: translateX(calc(100vw + 100px)); }
+		from {
+			transform: translateX(-100px);
+		}
+		to {
+			transform: translateX(calc(100vw + 100px));
+		}
 	}
 
 	/* 主内容 */
@@ -410,17 +613,33 @@
 		animation: sparkle 1s ease-in-out infinite;
 	}
 
-	.sparkle:nth-child(2) { animation-delay: 0.2s; }
-	.sparkle:nth-child(3) { animation-delay: 0.4s; }
+	.sparkle:nth-child(2) {
+		animation-delay: 0.2s;
+	}
+	.sparkle:nth-child(3) {
+		animation-delay: 0.4s;
+	}
 
 	@keyframes bounce {
-		0%, 100% { transform: translateY(0); }
-		50% { transform: translateY(-10px); }
+		0%,
+		100% {
+			transform: translateY(0);
+		}
+		50% {
+			transform: translateY(-10px);
+		}
 	}
 
 	@keyframes sparkle {
-		0%, 100% { transform: scale(1); opacity: 1; }
-		50% { transform: scale(1.3); opacity: 0.7; }
+		0%,
+		100% {
+			transform: scale(1);
+			opacity: 1;
+		}
+		50% {
+			transform: scale(1.3);
+			opacity: 0.7;
+		}
 	}
 
 	/* 标题区 */
@@ -432,13 +651,13 @@
 		font-family: 'Fredoka', sans-serif;
 		font-size: 2.8rem;
 		font-weight: 700;
-		color: #6B4C9A;
+		color: #6b4c9a;
 		margin: 0;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		gap: 0.5rem;
-		text-shadow: 2px 2px 0 #FFE4EC;
+		text-shadow: 2px 2px 0 #ffe4ec;
 	}
 
 	.title-emoji {
@@ -446,13 +665,18 @@
 	}
 
 	@keyframes wiggle {
-		0%, 100% { transform: rotate(-5deg); }
-		50% { transform: rotate(5deg); }
+		0%,
+		100% {
+			transform: rotate(-5deg);
+		}
+		50% {
+			transform: rotate(5deg);
+		}
 	}
 
 	.subtitle {
 		font-size: 1.2rem;
-		color: #8B7BA8;
+		color: #8b7ba8;
 		margin: 0.8rem 0;
 		font-weight: 500;
 	}
@@ -465,13 +689,13 @@
 		padding: 0.6rem 1.2rem;
 		border-radius: 50px;
 		font-size: 0.95rem;
-		color: #6B4C9A;
+		color: #6b4c9a;
 		box-shadow: 0 4px 15px rgba(107, 76, 154, 0.1);
 		backdrop-filter: blur(10px);
 	}
 
 	.download-stats strong {
-		color: #FF6B9D;
+		color: #ff6b9d;
 		font-weight: 700;
 	}
 
@@ -493,7 +717,7 @@
 	.auth-input {
 		width: 100%;
 		padding: 0.9rem 1.2rem;
-		border: 2px solid #E8E0F0;
+		border: 2px solid #e8e0f0;
 		border-radius: 14px;
 		font-size: 1rem;
 		font-family: inherit;
@@ -504,16 +728,16 @@
 	}
 
 	.auth-input:focus {
-		border-color: #B8A5D0;
+		border-color: #b8a5d0;
 		box-shadow: 0 0 0 4px rgba(107, 76, 154, 0.1);
 	}
 
 	.auth-input::placeholder {
-		color: #B8A5D0;
+		color: #b8a5d0;
 	}
 
 	.auth-error {
-		color: #FF6B9D;
+		color: #ff6b9d;
 		font-size: 0.9rem;
 		margin: 0;
 		text-align: left;
@@ -568,14 +792,14 @@
 	.modal-header h3 {
 		margin: 0;
 		font-family: 'Fredoka', sans-serif;
-		color: #6B4C9A;
+		color: #6b4c9a;
 		font-size: 1.2rem;
 	}
 
 	.modal-close {
 		border: none;
 		background: rgba(107, 76, 154, 0.1);
-		color: #6B4C9A;
+		color: #6b4c9a;
 		width: 32px;
 		height: 32px;
 		border-radius: 50%;
@@ -591,7 +815,7 @@
 
 	.modal-subtitle {
 		margin: 0;
-		color: #8B7BA8;
+		color: #8b7ba8;
 		font-size: 0.95rem;
 	}
 
@@ -608,7 +832,9 @@
 		align-items: center;
 		justify-content: center;
 		gap: 0.5rem;
-		transition: transform 0.3s ease, box-shadow 0.3s ease;
+		transition:
+			transform 0.3s ease,
+			box-shadow 0.3s ease;
 	}
 
 	.modal-btn:hover {
@@ -638,7 +864,9 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
-		transition: transform 0.3s ease, box-shadow 0.3s ease;
+		transition:
+			transform 0.3s ease,
+			box-shadow 0.3s ease;
 	}
 
 	.download-card:hover {
@@ -664,19 +892,19 @@
 		padding: 0.2rem 0.6rem;
 		border-radius: 999px;
 		font-weight: 600;
-		color: #6B4C9A;
+		color: #6b4c9a;
 		background: rgba(107, 76, 154, 0.12);
 	}
 
 	.storage-badge {
 		background: rgba(255, 107, 157, 0.15);
-		color: #FF6B9D;
+		color: #ff6b9d;
 	}
 
 	.card-title {
 		font-family: 'Fredoka', sans-serif;
 		font-size: 1.05rem;
-		color: #2D1B4E;
+		color: #2d1b4e;
 		margin: 0;
 	}
 
@@ -684,12 +912,12 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.3rem;
-		color: #8B7BA8;
+		color: #8b7ba8;
 		font-size: 0.85rem;
 	}
 
 	.card-desc {
-		color: #6B4C9A;
+		color: #6b4c9a;
 		background: rgba(107, 76, 154, 0.08);
 		padding: 0.2rem 0.5rem;
 		border-radius: 8px;
@@ -709,7 +937,9 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		transition: transform 0.3s ease, box-shadow 0.3s ease;
+		transition:
+			transform 0.3s ease,
+			box-shadow 0.3s ease;
 	}
 
 	.download-card-btn:hover {
@@ -724,6 +954,29 @@
 		box-shadow: none;
 	}
 
+	.turnstile-wrapper {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 1rem;
+		background: rgba(107, 76, 154, 0.05);
+		border-radius: 12px;
+		border: 2px dashed #e6e0f0;
+	}
+
+	.turnstile-hint {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #8b7ba8;
+	}
+
+	.turnstile-success {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #38ef7d;
+		font-weight: 600;
+	}
 
 	/* 加载状态 */
 	.loading-downloads {
@@ -732,28 +985,30 @@
 		align-items: center;
 		gap: 1rem;
 		padding: 2rem;
-		color: #8B7BA8;
+		color: #8b7ba8;
 	}
-	
+
 	.spinner {
 		width: 32px;
 		height: 32px;
 		border: 3px solid rgba(107, 76, 154, 0.2);
-		border-top-color: #6B4C9A;
+		border-top-color: #6b4c9a;
 		border-radius: 50%;
 		animation: spin 1s linear infinite;
 	}
-	
+
 	@keyframes spin {
-		to { transform: rotate(360deg); }
+		to {
+			transform: rotate(360deg);
+		}
 	}
-	
+
 	.no-downloads {
 		text-align: center;
 		padding: 2rem;
-		color: #8B7BA8;
+		color: #8b7ba8;
 	}
-	
+
 	.no-downloads span {
 		font-size: 3rem;
 		display: block;
@@ -764,7 +1019,7 @@
 	.footer {
 		text-align: center;
 		margin-top: 2rem;
-		color: #A89BC4;
+		color: #a89bc4;
 		font-size: 0.9rem;
 	}
 
@@ -785,6 +1040,5 @@
 		.download-list {
 			grid-template-columns: 1fr;
 		}
-
 	}
 </style>

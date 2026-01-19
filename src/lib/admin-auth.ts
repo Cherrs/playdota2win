@@ -46,7 +46,11 @@ async function hmacSha256Hex(secret: string, data: string): Promise<string> {
 		.join('');
 }
 
-export async function signDownloadPath(path: string, secret: string, ttlMs = ADMIN_SIGN_TTL_MS): Promise<string> {
+export async function signDownloadPath(
+	path: string,
+	secret: string,
+	ttlMs = ADMIN_SIGN_TTL_MS
+): Promise<string> {
 	const expires = Date.now() + ttlMs;
 	const data = `${path}|${expires}`;
 	const sig = await hmacSha256Hex(secret, data);

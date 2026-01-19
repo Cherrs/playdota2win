@@ -44,7 +44,10 @@ export async function signJwt(payload: Record<string, unknown>, secret: string):
 	return `${data}.${signaturePart}`;
 }
 
-export async function verifyJwt(token: string, secret: string): Promise<{ valid: boolean; payload?: any }> {
+export async function verifyJwt(
+	token: string,
+	secret: string
+): Promise<{ valid: boolean; payload?: any }> {
 	const parts = token.split('.');
 	if (parts.length !== 3) return { valid: false };
 	const [headerPart, payloadPart, signaturePart] = parts;
@@ -52,7 +55,7 @@ export async function verifyJwt(token: string, secret: string): Promise<{ valid:
 	const expected = await hmacSha256(secret, data);
 	const expectedPart = base64UrlEncode(expected);
 	if (expectedPart !== signaturePart) return { valid: false };
-	
+
 	const payloadJson = base64UrlDecodeToString(payloadPart);
 	const payload = JSON.parse(payloadJson);
 	if (typeof payload?.exp === 'number' && Date.now() > payload.exp) return { valid: false };

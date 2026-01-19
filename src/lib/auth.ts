@@ -35,7 +35,10 @@ export async function verifyDownloadToken(
 	if (!kv) return true;
 
 	try {
-		const stored = await kv.get<{ token: string; expiry: number; path?: string }>(DOWNLOAD_TOKEN_KEY + ':' + token, 'json');
+		const stored = await kv.get<{ token: string; expiry: number; path?: string }>(
+			DOWNLOAD_TOKEN_KEY + ':' + token,
+			'json'
+		);
 		if (!stored) return false;
 
 		if (Date.now() > stored.expiry) {
@@ -64,11 +67,9 @@ export async function saveDownloadToken(
 	if (!kv) return;
 
 	const expiry = Date.now() + DOWNLOAD_TOKEN_EXPIRY;
-	await kv.put(
-		DOWNLOAD_TOKEN_KEY + ':' + token,
-		JSON.stringify({ token, expiry, path }),
-		{ expirationTtl: Math.ceil(DOWNLOAD_TOKEN_EXPIRY / 1000) }
-	);
+	await kv.put(DOWNLOAD_TOKEN_KEY + ':' + token, JSON.stringify({ token, expiry, path }), {
+		expirationTtl: Math.ceil(DOWNLOAD_TOKEN_EXPIRY / 1000)
+	});
 }
 
 export async function verifyToken(

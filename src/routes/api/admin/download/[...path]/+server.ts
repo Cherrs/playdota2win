@@ -9,13 +9,14 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 			return new Response('R2 not available', { status: 500 });
 		}
 
-		const signingSecret = platform?.env.ADMIN_SIGNING_SECRET || platform?.env.ADMIN_PASSWORD || 'dev-secret';
+		const signingSecret =
+			platform?.env.ADMIN_SIGNING_SECRET || platform?.env.ADMIN_PASSWORD || 'dev-secret';
 		const url = new URL(request.url);
 		const authed = await verifySignedUrl(url, signingSecret);
 		if (!authed) {
 			return new Response('Unauthorized', { status: 401 });
 		}
-		
+
 		const key = params.path;
 		if (!key) {
 			return new Response('Path is required', { status: 400 });
@@ -24,20 +25,20 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 		if (key.includes('..') || key.startsWith('/') || key.includes('\\')) {
 			return new Response('Invalid key', { status: 400 });
 		}
-		
+
 		const object = await r2.get(key);
 		if (!object) {
 			return new Response('File not found', { status: 404 });
 		}
-		
+
 		const headers = new Headers();
 		object.writeHttpMetadata(headers);
 		headers.set('etag', object.httpEtag);
-		
+
 		// 设置下载文件名
 		const filename = key.split('/').pop() || 'download';
 		headers.set('Content-Disposition', `attachment; filename="${filename}"`);
-		
+
 		return new Response(object.body, { headers });
 	} catch (error) {
 		console.error('Error serving file:', error);
