@@ -126,6 +126,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const platform_type = formData.get('platform') as string;
 		const title = (formData.get('title') as string) || '';
 		const description = (formData.get('description') as string) || '';
+		const configGuide = (formData.get('configGuide') as string) || '';
 		const filename = (formData.get('filename') as string) || '';
 		const version = formData.get('version') as string;
 		const size = formData.get('size') as string;
@@ -188,6 +189,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			platform: platform_type as 'windows' | 'macos' | 'linux',
 			title: title || undefined,
 			description: description || undefined,
+			configGuide: configGuide || undefined,
 			filename: resolvedFilename,
 			version,
 			size,

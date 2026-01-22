@@ -18,6 +18,8 @@ export interface DownloadItem {
 	title?: string;
 	/** 描述（用于展示） */
 	description?: string;
+	/** 配置指引（多行文本） */
+	configGuide?: string;
 	/** 文件名（可选） */
 	filename?: string;
 	version: string;
@@ -75,6 +77,7 @@ export interface UploadFormData {
 	platform: Platform;
 	title?: string;
 	description?: string;
+	configGuide?: string;
 	filename?: string;
 	version: string;
 	size: string;

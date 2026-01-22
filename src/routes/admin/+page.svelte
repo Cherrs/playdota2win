@@ -32,6 +32,7 @@
 	let formPlatform = $state<Platform>('windows');
 	let formTitle = $state('');
 	let formDescription = $state('');
+	let formConfigGuide = $state('');
 	let formFilename = $state('');
 	let formVersion = $state('v1.0.0');
 	let formSize = $state('');
@@ -269,6 +270,9 @@
 			if (formDescription) {
 				formData.append('description', formDescription);
 			}
+			if (formConfigGuide) {
+				formData.append('configGuide', formConfigGuide);
+			}
 			if (formFilename) {
 				formData.append('filename', formFilename);
 			}
@@ -388,6 +392,7 @@
 		formPlatform = 'windows';
 		formTitle = '';
 		formDescription = '';
+		formConfigGuide = '';
 		formFilename = '';
 		formVersion = 'v1.0.0';
 		formSize = '';
@@ -592,6 +597,16 @@
 					></textarea>
 				</div>
 
+				<div class="form-group full-width">
+					<label for="configGuide">配置指引</label>
+					<textarea
+						id="configGuide"
+						bind:value={formConfigGuide}
+						placeholder="每行一条步骤，例如：复制 验证码123 或 打开 mumble://xxx"
+					></textarea>
+					<p class="field-hint">支持动作：复制 xxx / 打开 mumble://xxx 或 https://</p>
+				</div>
+
 				<div class="form-group">
 					<label for="filename">文件名</label>
 					<input
@@ -731,6 +746,13 @@
 									{/if}
 									{#if item.filename}
 										<span>📝 {item.filename}</span>
+									{/if}
+									{#if item.configGuide}
+										<span>
+											🧭 指引
+											{item.configGuide.split(/\r?\n/).filter(Boolean).length}
+											步
+										</span>
 									{/if}
 									<span
 										>🔗 <a href={getAdminDownloadUrl(item)} target="_blank" rel="noopener"
@@ -1065,6 +1087,12 @@
 	.form-group textarea {
 		min-height: 90px;
 		resize: vertical;
+	}
+
+	.field-hint {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #a89bc4;
 	}
 
 	.file-info {

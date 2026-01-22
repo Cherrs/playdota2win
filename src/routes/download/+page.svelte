@@ -12,6 +12,86 @@
 	let downloading = $state(false);
 	let showPasswordModal = $state(false);
 	let pendingItem = $state<DownloadItem | null>(null);
+	let selectedItem = $state<DownloadItem | null>(null);
+	let activeTab = $state<'download' | 'guide'>('download');
+	let guideMessage = $state('下载完成后请查看这里的配置指引～');
+
+	// 指引弹窗状态
+	let showGuideModal = $state(false);
+	let guideItem = $state<DownloadItem | null>(null);
+
+	function openGuideModal(item: DownloadItem) {
+		guideItem = item;
+		showGuideModal = true;
+	}
+
+	function closeGuideModal() {
+		showGuideModal = false;
+		guideItem = null;
+	}
+
+	function parseMarkdown(text: string): string {
+		if (!text) return '';
+		// Escape HTML
+		let escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+		const lines = escaped.split(/\r?\n/);
+		let output = '';
+		let inList = false;
+
+		const parseInline = (t: string) =>
+			t
+				.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+				.replace(/\*(.*?)\*/g, '<em>$1</em>')
+				.replace(/`(.*?)`/g, '<code>$1</code>')
+				.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+		for (let line of lines) {
+			// Headers
+			if (line.startsWith('#')) {
+				if (inList) {
+					output += '</ul>';
+					inList = false;
+				}
+				const levelMatch = line.match(/^#+/);
+				const level = levelMatch ? levelMatch[0].length : 1;
+				const content = line.substring(level).trim();
+				// Shift header levels: # -> h3, ## -> h4
+				const tagName = 'h' + Math.min(level + 2, 6);
+				output += `<${tagName}>${parseInline(content)}</${tagName}>`;
+				continue;
+			}
+
+			// List items
+			if (line.match(/^\s*-\s/)) {
+				if (!inList) {
+					output += '<ul>';
+					inList = true;
+				}
+				const content = line.replace(/^\s*-\s/, '');
+				output += `<li>${parseInline(content)}</li>`;
+				continue;
+			}
+
+			// End list if needed
+			if (inList && line.trim() === '') {
+				output += '</ul>';
+				inList = false;
+				continue;
+			}
+			if (inList && !line.match(/^\s*-\s/) && line.trim()) {
+				output += '</ul>';
+				inList = false;
+			}
+
+			// Regular lines
+			if (line.trim()) {
+				output += `<p>${parseInline(line)}</p>`;
+			}
+		}
+		if (inList) output += '</ul>';
+		return output;
+	}
 
 	// Turnstile 状态
 	let requireTurnstile = $state(false);
@@ -153,6 +233,52 @@
 		checkTurnstileRequired();
 	}
 
+	function selectTab(tab: 'download' | 'guide') {
+		activeTab = tab;
+	}
+
+	function parseGuideSteps(guide?: string): string[] {
+		if (!guide) return [];
+		return guide
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter(Boolean);
+	}
+
+	function getGuideAction(step: string): { type: 'copy' | 'open'; value: string } | null {
+		const copyMatch = step.match(/^\s*(?:复制|copy)\s*[:：]?\s*(.+)$/i);
+		if (copyMatch?.[1]) {
+			return { type: 'copy', value: copyMatch[1].trim() };
+		}
+		const openMatch = step.match(/^\s*(?:打开|open)\s*[:：]?\s*(\S+)\s*$/i);
+		if (openMatch?.[1]) {
+			return { type: 'open', value: openMatch[1].trim() };
+		}
+		const urlMatch = step.match(/\b(?:mumble|https?):\/\/[^\s]+/i);
+		if (urlMatch) {
+			return { type: 'open', value: urlMatch[0] };
+		}
+		return null;
+	}
+
+	async function handleGuideAction(action: { type: 'copy' | 'open'; value: string }) {
+		if (action.type === 'copy') {
+			try {
+				await navigator.clipboard.writeText(action.value);
+				guideMessage = `已复制：${action.value}`;
+			} catch (e) {
+				console.error('Failed to copy text:', e);
+				guideMessage = '复制失败，请手动复制。';
+			}
+			return;
+		}
+
+		if (action.type === 'open') {
+			window.open(action.value, '_blank', 'noopener');
+			guideMessage = `已打开：${action.value}`;
+		}
+	}
+
 	function closePasswordModal() {
 		showPasswordModal = false;
 		pendingItem = null;
@@ -195,6 +321,9 @@
 				if (typeof data.data.count === 'number') {
 					downloadCount = data.data.count;
 				}
+				selectedItem = item;
+				activeTab = 'guide';
+				guideMessage = '下载已开始，下面是配置指引～';
 				const link = document.createElement('a');
 				link.href = data.data.url;
 				link.target = '_blank';
@@ -323,49 +452,115 @@
 
 		<!-- 下载按钮区 -->
 		<div class="download-section">
-			{#if loading}
-				<div class="loading-downloads">
-					<div class="spinner"></div>
-					<span>加载中...</span>
-				</div>
-			{:else if downloads.length === 0}
-				<div class="no-downloads">
-					<span>😢</span>
-					<p>暂无可用的下载</p>
-				</div>
-			{:else}
-				<div class="download-list">
-					{#each downloads.filter((item) => item.enabled) as item (item.id)}
-						<div class="download-card">
-							<div class="card-header">
-								<div class="card-platform">
-									<span class="platform-badge">{getPlatformLabel(item.platform)}</span>
-									<span class="storage-badge">{item.storageType.toUpperCase()}</span>
+			<div class="tab-bar" role="tablist">
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'download'}
+					type="button"
+					role="tab"
+					aria-selected={activeTab === 'download'}
+					onclick={() => selectTab('download')}
+				>
+					下载
+				</button>
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'guide'}
+					type="button"
+					role="tab"
+					aria-selected={activeTab === 'guide'}
+					onclick={() => selectTab('guide')}
+				>
+					配置指引
+				</button>
+			</div>
+
+			{#if activeTab === 'download'}
+				{#if loading}
+					<div class="loading-downloads">
+						<div class="spinner"></div>
+						<span>加载中...</span>
+					</div>
+				{:else if downloads.length === 0}
+					<div class="no-downloads">
+						<span>😢</span>
+						<p>暂无可用的下载</p>
+					</div>
+				{:else}
+					<div class="download-list">
+						{#each downloads.filter((item) => item.enabled) as item (item.id)}
+							<div class="download-card">
+								<div class="card-header">
+									<div class="card-platform">
+										<span class="platform-badge">{getPlatformLabel(item.platform)}</span>
+										<span class="storage-badge">{item.storageType.toUpperCase()}</span>
+									</div>
+									<h3 class="card-title">
+										{item.title || `${getPlatformLabel(item.platform)} 版本`}
+									</h3>
 								</div>
-								<h3 class="card-title">
-									{item.title || `${getPlatformLabel(item.platform)} 版本`}
-								</h3>
+								<div class="card-meta">
+									<span>版本 {item.version}</span>
+									<span>大小 {item.size}</span>
+									{#if item.description}
+										<span class="card-desc">{item.description}</span>
+									{/if}
+									{#if item.filename}
+										<span>文件 {item.filename}</span>
+									{/if}
+								</div>
+								<div class="card-actions">
+									<button
+										class="card-btn btn-outline"
+										onclick={() => openGuideModal(item)}
+										type="button"
+									>
+										配置指引
+									</button>
+									<button
+										class="card-btn btn-primary"
+										onclick={() => openPasswordModal(item)}
+										disabled={downloading}
+									>
+										<span>立即下载</span>
+										<span class="btn-arrow">→</span>
+									</button>
+								</div>
 							</div>
-							<div class="card-meta">
-								<span>版本 {item.version}</span>
-								<span>大小 {item.size}</span>
-								{#if item.description}
-									<span class="card-desc">{item.description}</span>
-								{/if}
-								{#if item.filename}
-									<span>文件 {item.filename}</span>
-								{/if}
-							</div>
-							<button
-								class="download-card-btn"
-								onclick={() => openPasswordModal(item)}
-								disabled={downloading}
-							>
-								<span>立即下载</span>
-								<span class="btn-arrow">→</span>
-							</button>
+						{/each}
+					</div>
+				{/if}
+			{:else}
+				<div class="guide-panel" role="tabpanel">
+					<div class="guide-header">
+						<h3>配置指引</h3>
+						{#if selectedItem}
+							<p>
+								{selectedItem.title || `${getPlatformLabel(selectedItem.platform)} 版本`}
+							</p>
+						{/if}
+					</div>
+					<p class="guide-message">{guideMessage}</p>
+					{#if selectedItem && parseGuideSteps(selectedItem.configGuide).length > 0}
+						<ol class="guide-steps">
+							{#each parseGuideSteps(selectedItem.configGuide) as step (step)}
+								{@const action = getGuideAction(step)}
+								<li>
+									<div class="guide-step-text">{step}</div>
+									{#if action}
+										<button class="guide-action" onclick={() => handleGuideAction(action)}>
+											{action.type === 'copy' ? '点击复制' : '打开链接'}
+										</button>
+									{/if}
+								</li>
+							{/each}
+						</ol>
+					{:else}
+						<div class="guide-empty">
+							<span>🌸</span>
+							<p>暂无配置指引，请联系管理员补充～</p>
 						</div>
-					{/each}
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -426,6 +621,43 @@
 							开始下载 →
 						{/if}
 					</button>
+				</div>
+			</div>
+		{/if}
+
+		{#if showGuideModal && guideItem}
+			<div class="modal-backdrop" role="dialog" aria-modal="true">
+				<button
+					type="button"
+					class="modal-scrim"
+					onclick={closeGuideModal}
+					onkeydown={(e) =>
+						(e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && closeGuideModal()}
+					aria-label="关闭"
+				></button>
+				<div class="modal-card modal-lg">
+					<div class="modal-header">
+						<h3>📖 配置指引</h3>
+						<button class="modal-close" onclick={closeGuideModal}>×</button>
+					</div>
+					<p class="modal-subtitle">
+						{guideItem.title || `${getPlatformLabel(guideItem.platform)} 版本`}
+					</p>
+					<div class="guide-content-scroll">
+						{#if guideItem.configGuide}
+							<div class="markdown-body">
+								{@html parseMarkdown(guideItem.configGuide)}
+							</div>
+						{:else}
+							<div class="guide-empty">
+								<span>🌸</span>
+								<p>暂无配置指引，请联系管理员补充～</p>
+							</div>
+						{/if}
+					</div>
+					<div class="modal-footer">
+						<button class="modal-btn" onclick={closeGuideModal}> 我学会啦！ </button>
+					</div>
 				</div>
 			</div>
 		{/if}
@@ -708,6 +940,133 @@
 		max-width: 720px;
 	}
 
+	.tab-bar {
+		display: flex;
+		gap: 0.75rem;
+		padding: 0.4rem;
+		background: rgba(255, 255, 255, 0.7);
+		border-radius: 999px;
+		box-shadow: 0 8px 20px rgba(107, 76, 154, 0.12);
+		backdrop-filter: blur(10px);
+	}
+
+	.tab-btn {
+		flex: 1;
+		border: none;
+		background: transparent;
+		color: #8b7ba8;
+		font-weight: 600;
+		font-family: inherit;
+		padding: 0.6rem 1rem;
+		border-radius: 999px;
+		cursor: pointer;
+		transition:
+			transform 0.3s ease,
+			box-shadow 0.3s ease,
+			background 0.3s ease,
+			color 0.3s ease;
+	}
+
+	.tab-btn:hover {
+		transform: translateY(-1px);
+		color: #6b4c9a;
+	}
+
+	.tab-btn.active {
+		background: linear-gradient(135deg, #ff9ec4 0%, #c8b2ff 100%);
+		color: #2d1b4e;
+		box-shadow: 0 8px 20px rgba(255, 107, 157, 0.35);
+	}
+
+	.guide-panel {
+		background: rgba(255, 255, 255, 0.9);
+		border-radius: 20px;
+		padding: 1.5rem;
+		box-shadow: 0 12px 30px rgba(107, 76, 154, 0.12);
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.guide-header h3 {
+		margin: 0;
+		font-family: 'Fredoka', sans-serif;
+		color: #6b4c9a;
+		font-size: 1.3rem;
+	}
+
+	.guide-header p {
+		margin: 0.3rem 0 0;
+		color: #8b7ba8;
+		font-size: 0.95rem;
+	}
+
+	.guide-message {
+		margin: 0;
+		color: #6b4c9a;
+		background: rgba(255, 255, 255, 0.8);
+		border-radius: 12px;
+		padding: 0.8rem 1rem;
+		box-shadow: inset 0 0 0 1px rgba(107, 76, 154, 0.08);
+	}
+
+	.guide-steps {
+		margin: 0;
+		padding-left: 1.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		color: #4d3a73;
+	}
+
+	.guide-steps li {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.6rem 0.8rem;
+		background: rgba(255, 240, 247, 0.8);
+		border-radius: 12px;
+		box-shadow: 0 6px 16px rgba(107, 76, 154, 0.08);
+	}
+
+	.guide-step-text {
+		flex: 1;
+		min-width: 180px;
+		color: #2d1b4e;
+	}
+
+	.guide-action {
+		border: none;
+		background: linear-gradient(135deg, #ff6b9d 0%, #6b4c9a 100%);
+		color: white;
+		font-weight: 600;
+		font-family: inherit;
+		padding: 0.45rem 0.9rem;
+		border-radius: 999px;
+		cursor: pointer;
+		transition:
+			transform 0.3s ease,
+			box-shadow 0.3s ease;
+	}
+
+	.guide-action:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 8px 18px rgba(255, 107, 157, 0.35);
+	}
+
+	.guide-empty {
+		text-align: center;
+		color: #8b7ba8;
+		padding: 1rem 0;
+	}
+
+	.guide-empty span {
+		font-size: 2rem;
+		display: block;
+		margin-bottom: 0.5rem;
+	}
+
 	.auth-form {
 		display: flex;
 		flex-direction: column;
@@ -924,34 +1283,140 @@
 		line-height: 1.4;
 	}
 
-	.download-card-btn {
+	.card-actions {
 		margin-top: 0.5rem;
+		display: flex;
+		gap: 0.8rem;
+	}
+
+	.card-btn {
+		flex: 1;
 		border: none;
 		border-radius: 14px;
 		padding: 0.7rem 1rem;
-		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-		color: white;
 		font-weight: 600;
 		font-family: inherit;
 		cursor: pointer;
 		display: flex;
-		justify-content: space-between;
+		justify-content: center;
 		align-items: center;
+		gap: 0.4rem;
 		transition:
 			transform 0.3s ease,
-			box-shadow 0.3s ease;
+			box-shadow 0.3s ease,
+			background 0.3s ease,
+			color 0.3s ease;
 	}
 
-	.download-card-btn:hover {
+	.btn-primary {
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+	}
+
+	.btn-outline {
+		background: transparent;
+		border: 2px solid #b8a5d0;
+		color: #6b4c9a;
+	}
+
+	.card-btn:hover {
 		transform: translateY(-2px);
+		box-shadow: 0 5px 15px rgba(107, 76, 154, 0.15);
+	}
+
+	.btn-primary:hover {
 		box-shadow: 0 10px 25px rgba(102, 126, 234, 0.35);
 	}
 
-	.download-card-btn:disabled {
+	.btn-outline:hover {
+		border-color: #6b4c9a;
+		background: rgba(107, 76, 154, 0.05);
+	}
+
+	.card-btn:disabled {
 		opacity: 0.7;
 		cursor: not-allowed;
 		transform: none;
 		box-shadow: none;
+	}
+
+	.modal-lg {
+		max-width: 600px;
+	}
+
+	.guide-content-scroll {
+		max-height: 60vh;
+		overflow-y: auto;
+		padding-right: 0.5rem;
+		/* Custom scrollbar */
+		scrollbar-width: thin;
+		scrollbar-color: #b8a5d0 transparent;
+	}
+
+	.guide-content-scroll::-webkit-scrollbar {
+		width: 6px;
+	}
+
+	.guide-content-scroll::-webkit-scrollbar-thumb {
+		background-color: #b8a5d0;
+		border-radius: 3px;
+	}
+
+	.markdown-body {
+		color: #4d3a73;
+		line-height: 1.6;
+		font-size: 0.95rem;
+	}
+
+	.markdown-body :global(h3),
+	.markdown-body :global(h4) {
+		color: #6b4c9a;
+		margin: 1.2rem 0 0.6rem;
+		font-family: 'Fredoka', sans-serif;
+	}
+
+	.markdown-body :global(h3) {
+		font-size: 1.2rem;
+		border-bottom: 2px solid rgba(107, 76, 154, 0.1);
+		padding-bottom: 0.4rem;
+	}
+
+	.markdown-body :global(p) {
+		margin: 0.6rem 0;
+	}
+
+	.markdown-body :global(ul) {
+		padding-left: 1.2rem;
+		margin: 0.6rem 0;
+	}
+
+	.markdown-body :global(li) {
+		margin: 0.3rem 0;
+	}
+
+	.markdown-body :global(code) {
+		background: rgba(107, 76, 154, 0.08);
+		padding: 0.2rem 0.4rem;
+		border-radius: 6px;
+		font-family: monospace;
+		font-size: 0.9em;
+		color: #e91e63;
+	}
+
+	.markdown-body :global(a) {
+		color: #ff6b9d;
+		text-decoration: none;
+		font-weight: 500;
+	}
+
+	.markdown-body :global(a:hover) {
+		text-decoration: underline;
+	}
+
+	.modal-footer {
+		display: flex;
+		justify-content: flex-end;
+		margin-top: 0.5rem;
 	}
 
 	.turnstile-wrapper {
