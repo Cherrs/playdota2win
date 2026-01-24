@@ -75,7 +75,87 @@
 	// 下载项分类字段
 	let formCategoryId = $state<string | undefined>(undefined);
 
-	// 编辑状态（移除未使用的 editingId）
+	// 编辑状态
+	let editingDownloadId = $state<string | null>(null);
+	let showEditModal = $state(false);
+	let addFormSnapshot = $state<{
+		platform: Platform;
+		title: string;
+		description: string;
+		configGuide: string;
+		filename: string;
+		version: string;
+		size: string;
+		storageType: StorageType;
+		url: string;
+		file: File | null;
+		s3Endpoint: string;
+		s3Bucket: string;
+		s3PresignedUrl: string;
+		s3PublicUrl: string;
+		s3Region: string;
+		categoryId: string | undefined;
+	} | null>(null);
+
+	function openEditForm(item: DownloadItem) {
+		addFormSnapshot = {
+			platform: formPlatform,
+			title: formTitle,
+			description: formDescription,
+			configGuide: formConfigGuide,
+			filename: formFilename,
+			version: formVersion,
+			size: formSize,
+			storageType: formStorageType,
+			url: formUrl,
+			file: formFile,
+			s3Endpoint: formS3Endpoint,
+			s3Bucket: formS3Bucket,
+			s3PresignedUrl: formS3PresignedUrl,
+			s3PublicUrl: formS3PublicUrl,
+			s3Region: formS3Region,
+			categoryId: formCategoryId
+		};
+		editingDownloadId = item.id;
+		formPlatform = item.platform;
+		formTitle = item.title || '';
+		formDescription = item.description || '';
+		formConfigGuide = item.configGuide || '';
+		formFilename = item.filename || '';
+		formVersion = item.version;
+		formSize = item.size;
+		formCategoryId = item.categoryId;
+		showEditModal = true;
+		success = '';
+		error = '';
+	}
+
+	function closeEditForm() {
+		showEditModal = false;
+		editingDownloadId = null;
+		if (addFormSnapshot) {
+			const snapshot = addFormSnapshot;
+			formPlatform = snapshot.platform;
+			formTitle = snapshot.title;
+			formDescription = snapshot.description;
+			formConfigGuide = snapshot.configGuide;
+			formFilename = snapshot.filename;
+			formVersion = snapshot.version;
+			formSize = snapshot.size;
+			formStorageType = snapshot.storageType;
+			formUrl = snapshot.url;
+			formFile = snapshot.file;
+			formS3Endpoint = snapshot.s3Endpoint;
+			formS3Bucket = snapshot.s3Bucket;
+			formS3PresignedUrl = snapshot.s3PresignedUrl;
+			formS3PublicUrl = snapshot.s3PublicUrl;
+			formS3Region = snapshot.s3Region;
+			formCategoryId = snapshot.categoryId;
+			addFormSnapshot = null;
+		} else {
+			resetForm();
+		}
+	}
 
 	// 检查是否需要 Turnstile
 	async function checkTurnstileRequired() {
@@ -170,6 +250,53 @@
 			}
 		}
 		turnstileToken = '';
+	}
+
+	async function handleEditSave() {
+		if (!editingDownloadId) return;
+		if (!formVersion || !formSize) {
+			error = '请填写版本和大小';
+			return;
+		}
+
+		saving = true;
+		error = '';
+		success = '';
+
+		try {
+			const token = localStorage.getItem('admin_token');
+			const res = await fetch('/api/admin', {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+					...(token ? { Authorization: `Bearer ${token}` } : {})
+				},
+				body: JSON.stringify({
+					id: editingDownloadId,
+					platform: formPlatform,
+					categoryId: formCategoryId || null,
+					title: formTitle.trim() || undefined,
+					description: formDescription.trim() || undefined,
+					configGuide: formConfigGuide.trim() || undefined,
+					filename: formFilename.trim() || undefined,
+					version: formVersion.trim(),
+					size: formSize.trim()
+				})
+			});
+
+			const data: ApiResponse<DownloadItem> = await res.json();
+			if (data.success && data.data) {
+				downloads = downloads.map((d) => (d.id === editingDownloadId ? data.data! : d));
+				success = '更新成功！';
+				closeEditForm();
+			} else {
+				error = data.error || '更新失败';
+			}
+		} catch {
+			error = '网络错误';
+		} finally {
+			saving = false;
+		}
 	}
 
 	// 登录验证
@@ -1082,6 +1209,113 @@
 			</div>
 		{/if}
 
+		{#if showEditModal}
+			<div class="modal-backdrop" role="dialog" aria-modal="true">
+				<button
+					type="button"
+					class="modal-scrim"
+					onclick={closeEditForm}
+					onkeydown={(e) =>
+						(e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && closeEditForm()}
+					aria-label="关闭"
+				></button>
+				<div class="modal-card modal-lg">
+					<div class="modal-header">
+						<h3>编辑下载项</h3>
+						<button class="modal-close" onclick={closeEditForm}>×</button>
+					</div>
+
+					{#if error}
+						<p class="auth-error">{error}</p>
+					{/if}
+
+					<div class="auth-form modal-form-grid">
+						<div class="form-group full-width">
+							<p class="field-hint">仅支持编辑文字信息，存储方式与下载链接请在重新添加时调整。</p>
+						</div>
+						<div class="form-group">
+							<label for="editPlatform">平台</label>
+							<select id="editPlatform" bind:value={formPlatform}>
+								<option value="windows">🪟 Windows</option>
+								<option value="macos">🍎 macOS</option>
+								<option value="linux">🐧 Linux</option>
+							</select>
+						</div>
+
+						<div class="form-group">
+							<label for="editVersion">版本号</label>
+							<input id="editVersion" type="text" bind:value={formVersion} placeholder="v1.0.0" />
+						</div>
+
+						<div class="form-group">
+							<label for="editCategory">分类</label>
+							<select id="editCategory" bind:value={formCategoryId}>
+								<option value={undefined}>无分类</option>
+								{#each categories as category (category.id)}
+									<option value={category.id}>{category.icon || ''} {category.name}</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="form-group">
+							<label for="editTitle">标题</label>
+							<input
+								id="editTitle"
+								type="text"
+								bind:value={formTitle}
+								placeholder="例如：PlayDota2Win Windows 稳定版"
+							/>
+						</div>
+
+						<div class="form-group full-width">
+							<label for="editDescription">描述</label>
+							<textarea
+								id="editDescription"
+								bind:value={formDescription}
+								placeholder="简短描述这个版本的特性或用途"
+							></textarea>
+						</div>
+
+						<div class="form-group full-width">
+							<label for="editConfigGuide">配置指引</label>
+							<textarea
+								id="editConfigGuide"
+								bind:value={formConfigGuide}
+								placeholder="每行一条步骤，例如：复制 验证码123 或 打开 mumble://xxx"
+							></textarea>
+							<p class="field-hint">支持动作：复制 xxx / 打开 mumble://xxx 或 https://</p>
+						</div>
+
+						<div class="form-group">
+							<label for="editFilename">文件名</label>
+							<input
+								id="editFilename"
+								type="text"
+								bind:value={formFilename}
+								placeholder="例如：PlayDota2Win.exe"
+							/>
+						</div>
+
+						<div class="form-group">
+							<label for="editSize">文件大小</label>
+							<input id="editSize" type="text" bind:value={formSize} placeholder="45MB" />
+						</div>
+					</div>
+
+					<div class="modal-footer">
+						<button class="btn btn-secondary" onclick={closeEditForm}> 取消 </button>
+						<button class="btn btn-primary" onclick={handleEditSave} disabled={saving}>
+							{#if saving}
+								<span class="spinner"></span> 保存中...
+							{:else}
+								保存
+							{/if}
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
+
 		<!-- 添加表单 -->
 		<section class="form-section">
 			<h2>✨ 添加下载项</h2>
@@ -1370,14 +1604,19 @@
 											步
 										</span>
 									{/if}
-									<span
-										>🔗 <a
+									<span>
+										🔗
+										<!-- eslint-disable svelte/no-navigation-without-resolve -->
+										<a
 											href={resolveAdminDownloadUrl(item)}
 											target="_blank"
 											rel="noopener"
-											onclick={(event) => event.stopPropagation()}>{item.url.slice(0, 50)}...</a
-										></span
-									>
+											onclick={(event) => event.stopPropagation()}
+										>
+											{item.url.slice(0, 50)}...
+										</a>
+										<!-- eslint-enable svelte/no-navigation-without-resolve -->
+									</span>
 								</div>
 							</div>
 							<div class="item-actions">
@@ -1389,6 +1628,7 @@
 								>
 									{item.enabled ? '禁用' : '启用'}
 								</button>
+								<button class="btn btn-small" onclick={() => openEditForm(item)}> 编辑 </button>
 								<button class="btn btn-small btn-danger" onclick={() => handleDelete(item.id)}>
 									删除
 								</button>
