@@ -221,6 +221,7 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
+			console.error('PUT /api/admin: KV not available');
 			return json({ success: false, error: 'KV not available' } satisfies ApiResponse, {
 				status: 500
 			});
@@ -229,22 +230,30 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 		const jwtSecret = platform?.env.ADMIN_JWT_SECRET;
 		const authed = await requireAdminAuth(request, jwtSecret, kv);
 		if (!authed) {
+			console.error('PUT /api/admin: Unauthorized');
 			return json({ success: false, error: 'Unauthorized' } satisfies ApiResponse, { status: 401 });
 		}
 
 		const body = (await request.json()) as { id: string; [key: string]: unknown };
+		console.log('PUT /api/admin: Received body:', body);
+
 		const { id, ...updates } = body;
 		if (!id) {
+			console.error('PUT /api/admin: ID is required');
 			return json({ success: false, error: 'ID is required' } satisfies ApiResponse, {
 				status: 400
 			});
 		}
 
 		const normalizedUpdates = { ...updates } as Record<string, unknown>;
-		if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'categoryId')) {
-			const value = normalizedUpdates.categoryId;
-			if (value === null || value === '') {
-				normalizedUpdates.categoryId = undefined;
+		// 将空字符串转换为 undefined 的可选字段
+		const optionalFields = ['categoryId', 'title', 'description', 'configGuide', 'filename'];
+		for (const field of optionalFields) {
+			if (Object.prototype.hasOwnProperty.call(normalizedUpdates, field)) {
+				const value = normalizedUpdates[field];
+				if (value === null || value === '') {
+					normalizedUpdates[field] = undefined;
+				}
 			}
 		}
 
@@ -252,10 +261,15 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 		const index = list.items.findIndex((item) => item.id === id);
 
 		if (index === -1) {
+			console.error('PUT /api/admin: Item not found, id:', id);
 			return json({ success: false, error: 'Item not found' } satisfies ApiResponse, {
 				status: 404
 			});
 		}
+
+		console.log('PUT /api/admin: Found item at index', index);
+		console.log('PUT /api/admin: Current item:', list.items[index]);
+		console.log('PUT /api/admin: Updates:', normalizedUpdates);
 
 		list.items[index] = {
 			...list.items[index],
@@ -263,13 +277,23 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 			updatedAt: Date.now()
 		};
 
+		console.log('PUT /api/admin: Updated item:', list.items[index]);
+
 		await saveDownloadList(kv, list);
+		console.log('PUT /api/admin: Saved to KV successfully');
+
 		return json({ success: true, data: list.items[index] } satisfies ApiResponse<DownloadItem>);
 	} catch (error) {
-		console.error('Error updating download:', error);
-		return json({ success: false, error: 'Failed to update download' } satisfies ApiResponse, {
-			status: 500
-		});
+		console.error('PUT /api/admin: Error updating download:', error);
+		return json(
+			{
+				success: false,
+				error: error instanceof Error ? error.message : 'Failed to update download'
+			} satisfies ApiResponse,
+			{
+				status: 500
+			}
+		);
 	}
 };
 
