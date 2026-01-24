@@ -1,29 +1,15 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import type { ApiResponse, DownloadList } from '$lib/types';
 import { verifyDownloadPassword, generateDownloadToken, saveDownloadToken } from '$lib/auth';
+import {
+	verifyTurnstile,
+	FailureCounter,
+	getClientIp,
+	getTurnstileStatus,
+	FAILURE_THRESHOLD
+} from '$lib/turnstile';
 
 const KV_KEY = 'downloads_list';
-// 失败次数阈值，超过后需要 Turnstile 验证
-const FAILURE_THRESHOLD = 3;
-// 失败计数过期时间（秒）
-const FAILURE_TTL = 60 * 15; // 15 分钟
-
-// 验证 Turnstile token
-async function verifyTurnstile(token: string, secretKey: string, ip: string): Promise<boolean> {
-	const formData = new URLSearchParams();
-	formData.append('secret', secretKey);
-	formData.append('response', token);
-	formData.append('remoteip', ip);
-
-	const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-		body: formData
-	});
-
-	const result = (await response.json()) as { success: boolean };
-	return result.success;
-}
 
 function getFilenameFromUrl(url: string): string {
 	try {
@@ -35,33 +21,24 @@ function getFilenameFromUrl(url: string): string {
 	}
 }
 
-// GET: 检查是否需要 Turnstile
 export const GET: RequestHandler = async ({ request, platform }) => {
 	const kv = platform?.env.APP_KV;
 	const siteKey = platform?.env.TURNSTILE_SITE_KEY || '';
-	const ip =
-		request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
-	const kvKey = `download_failures:${ip}`;
+	const ip = getClientIp(request);
 
-	let failureCount = 0;
-	if (kv) {
-		const stored = await kv.get(kvKey);
-		failureCount = stored ? parseInt(stored, 10) : 0;
-	}
-
-	const requireTurnstile = failureCount >= FAILURE_THRESHOLD;
+	const counter = new FailureCounter(kv, 'download_failures');
+	const status = await getTurnstileStatus(counter, ip, siteKey);
 
 	return json({
 		success: true,
 		data: {
-			requireTurnstile,
-			siteKey: requireTurnstile ? siteKey : '',
-			failureCount
+			requireTurnstile: status.required,
+			siteKey: status.siteKey,
+			failureCount: status.failureCount
 		}
 	} satisfies ApiResponse<{ requireTurnstile: boolean; siteKey: string; failureCount: number }>);
 };
 
-// POST: 验证密码并返回下载链接
 export const POST: RequestHandler = async ({ request, platform }) => {
 	try {
 		const { itemId, password, turnstileToken } = (await request.json()) as {
@@ -79,19 +56,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		}
 
 		const kv = platform?.env.APP_KV;
-		const ip =
-			request.headers.get('CF-Connecting-IP') ||
-			request.headers.get('X-Forwarded-For') ||
-			'unknown';
-		const kvKey = `download_failures:${ip}`;
 		const secretKey = platform?.env.TURNSTILE_SECRET_KEY || '';
 		const siteKey = platform?.env.TURNSTILE_SITE_KEY || '';
+		const ip = getClientIp(request);
 
-		let failureCount = 0;
-		if (kv) {
-			const stored = await kv.get(kvKey);
-			failureCount = stored ? parseInt(stored, 10) : 0;
-		}
+		const counter = new FailureCounter(kv, 'download_failures');
+		const failureCount = await counter.getCount(ip);
 
 		if (failureCount >= FAILURE_THRESHOLD) {
 			if (!turnstileToken) {
@@ -120,12 +90,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 		const isValid = verifyDownloadPassword(password, platform?.env);
 		if (!isValid) {
-			if (kv) {
-				const newCount = failureCount + 1;
-				await kv.put(kvKey, newCount.toString(), { expirationTtl: FAILURE_TTL });
-			}
-
-			const newFailureCount = failureCount + 1;
+			const newFailureCount = await counter.increment(ip);
 			const requireTurnstile = newFailureCount >= FAILURE_THRESHOLD;
 
 			return json(
@@ -154,7 +119,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			});
 		}
 
-		await kv.delete(kvKey);
+		await counter.clear(ip);
 
 		const data = await kv.get<DownloadList>(KV_KEY, 'json');
 		const list = data || { items: [], downloadCount: 12580, lastUpdated: Date.now() };
@@ -165,17 +130,35 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 		let url = item.url;
 		let filename = item.filename || getFilenameFromUrl(item.url);
+
+		console.log('[Download Link] Item details:', {
+			id: item.id,
+			storageType: item.storageType,
+			originalUrl: item.url,
+			filename: item.filename
+		});
+
 		if (item.storageType === 'r2' && item.url.startsWith('/api/admin/download/')) {
 			const key = item.url.replace('/api/admin/download/', '');
 			const token = generateDownloadToken();
 			await saveDownloadToken(token, kv, key);
 			url = `/api/downloads/relay/${key}?token=${token}`;
 			filename = item.filename || key.split('/').pop() || 'download';
+			console.log('[Download Link] Generated R2 relay URL:', url);
+		} else {
+			console.log('[Download Link] Using direct URL:', url);
 		}
 
-		// 记录下载次数
 		list.downloadCount = (list.downloadCount || 0) + 1;
 		await kv.put(KV_KEY, JSON.stringify(list));
+
+		console.log('[Download Link] Final response:', {
+			url,
+			filename,
+			count: list.downloadCount,
+			originalItemUrl: item.url,
+			storageType: item.storageType
+		});
 
 		return json({
 			success: true,

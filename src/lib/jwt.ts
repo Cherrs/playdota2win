@@ -17,7 +17,7 @@ function base64UrlDecodeToString(input: string): string {
 	const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4));
 	const b64 = input.replace(/-/g, '+').replace(/_/g, '/') + pad;
 	const binary = atob(b64);
-	let bytes = new Uint8Array(binary.length);
+	const bytes = new Uint8Array(binary.length);
 	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 	return new TextDecoder().decode(bytes);
 }
@@ -47,7 +47,7 @@ export async function signJwt(payload: Record<string, unknown>, secret: string):
 export async function verifyJwt(
 	token: string,
 	secret: string
-): Promise<{ valid: boolean; payload?: any }> {
+): Promise<{ valid: boolean; payload?: Record<string, unknown> }> {
 	const parts = token.split('.');
 	if (parts.length !== 3) return { valid: false };
 	const [headerPart, payloadPart, signaturePart] = parts;

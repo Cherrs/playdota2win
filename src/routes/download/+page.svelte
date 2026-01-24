@@ -1,10 +1,21 @@
 <script lang="ts">
-	import type { DownloadItem, DownloadList, ApiResponse, Platform } from '$lib/types';
+	import type {
+		DownloadItem,
+		DownloadList,
+		ApiResponse,
+		Platform,
+		Category,
+		CategoryList
+	} from '$lib/types';
 
 	let isHovering = $state(false);
 	let downloadCount = $state(0);
 	let downloads = $state<DownloadItem[]>([]);
 	let loading = $state(true);
+
+	// 分类相关
+	let categories = $state<Category[]>([]);
+	let selectedCategoryId = $state<string | null>(null);
 
 	// 下载密码
 	let password = $state('');
@@ -32,8 +43,9 @@
 
 	function parseMarkdown(text: string): string {
 		if (!text) return '';
+
 		// Escape HTML
-		let escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 		const lines = escaped.split(/\r?\n/);
 		let output = '';
@@ -93,12 +105,29 @@
 		return output;
 	}
 
+	function stripHtmlTags(markup: string): string {
+		return markup.replace(/<[^>]*>/g, '');
+	}
+
 	// Turnstile 状态
 	let requireTurnstile = $state(false);
 	let turnstileSiteKey = $state('');
 	let turnstileToken = $state('');
 	let turnstileWidgetId = $state<string | null>(null);
 	let turnstileLoaded = $state(false);
+
+	// 加载分类列表
+	async function loadCategories() {
+		try {
+			const res = await fetch('/api/categories');
+			const data: ApiResponse<CategoryList> = await res.json();
+			if (data.success && data.data) {
+				categories = data.data.items;
+			}
+		} catch (e) {
+			console.error('Failed to load categories:', e);
+		}
+	}
 
 	// 加载下载列表
 	async function loadDownloads() {
@@ -317,6 +346,8 @@
 				requireTurnstile?: boolean;
 				siteKey?: string;
 			}> = await res.json();
+			console.log('[Download] API Response:', data);
+			console.log('[Download] URL from API:', data.data?.url);
 			if (data.success && data.data?.url) {
 				if (typeof data.data.count === 'number') {
 					downloadCount = data.data.count;
@@ -324,8 +355,10 @@
 				selectedItem = item;
 				activeTab = 'guide';
 				guideMessage = '下载已开始，下面是配置指引～';
+				console.log('[Download] Creating download link with URL:', data.data.url);
 				const link = document.createElement('a');
 				link.href = data.data.url;
+				console.log('[Download] Link href after assignment:', link.href);
 				link.target = '_blank';
 				link.rel = 'noopener';
 				if (data.data.filename) {
@@ -363,8 +396,21 @@
 
 	// 初始加载
 	$effect(() => {
+		loadCategories();
 		loadDownloads();
 	});
+
+	// 过滤下载项（根据选中的分类）
+	function getFilteredDownloads(): DownloadItem[] {
+		if (!selectedCategoryId) {
+			return downloads.filter((item) => item.enabled);
+		}
+		return downloads.filter((item) => item.enabled && item.categoryId === selectedCategoryId);
+	}
+
+	function selectCategory(categoryId: string | null) {
+		selectedCategoryId = categoryId;
+	}
 </script>
 
 <svelte:head>
@@ -450,6 +496,40 @@
 			</div>
 		</div>
 
+		<!-- 分类选项卡 -->
+		{#if categories.length > 0}
+			<div class="category-tabs">
+				<button
+					class="category-tab"
+					class:active={selectedCategoryId === null}
+					onclick={() => selectCategory(null)}
+					type="button"
+				>
+					<span class="tab-icon">🌟</span>
+					<span class="tab-label">全部</span>
+					<span class="tab-count">{downloads.filter((d) => d.enabled).length}</span>
+				</button>
+				{#each categories as category (category.id)}
+					{@const count = downloads.filter((d) => d.enabled && d.categoryId === category.id).length}
+					<button
+						class="category-tab"
+						class:active={selectedCategoryId === category.id}
+						onclick={() => selectCategory(category.id)}
+						type="button"
+						style:--category-color={category.color || '#6B4C9A'}
+					>
+						{#if category.icon}
+							<span class="tab-icon">{category.icon}</span>
+						{/if}
+						<span class="tab-label">{category.name}</span>
+						{#if count > 0}
+							<span class="tab-count">{count}</span>
+						{/if}
+					</button>
+				{/each}
+			</div>
+		{/if}
+
 		<!-- 下载按钮区 -->
 		<div class="download-section">
 			<div class="tab-bar" role="tablist">
@@ -483,12 +563,19 @@
 					</div>
 				{:else if downloads.length === 0}
 					<div class="no-downloads">
-						<span>😢</span>
+						<span>📦</span>
 						<p>暂无可用的下载</p>
+						<p class="hint">请稍后再来看看～</p>
+					</div>
+				{:else if getFilteredDownloads().length === 0}
+					<div class="no-downloads">
+						<span>🔍</span>
+						<p>该分类暂无下载</p>
+						<p class="hint">试试其他分类吧～</p>
 					</div>
 				{:else}
 					<div class="download-list">
-						{#each downloads.filter((item) => item.enabled) as item (item.id)}
+						{#each getFilteredDownloads() as item (item.id)}
 							<div class="download-card">
 								<div class="card-header">
 									<div class="card-platform">
@@ -646,7 +733,7 @@
 					<div class="guide-content-scroll">
 						{#if guideItem.configGuide}
 							<div class="markdown-body">
-								{@html parseMarkdown(guideItem.configGuide)}
+								{stripHtmlTags(parseMarkdown(guideItem.configGuide))}
 							</div>
 						{:else}
 							<div class="guide-empty">
@@ -929,6 +1016,95 @@
 	.download-stats strong {
 		color: #ff6b9d;
 		font-weight: 700;
+	}
+
+	/* 分类选项卡 */
+	.category-tabs {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		justify-content: center;
+		width: 100%;
+		max-width: 720px;
+		padding: 0.5rem;
+	}
+
+	.category-tab {
+		--category-color: #6b4c9a;
+		border: none;
+		background: rgba(255, 255, 255, 0.75);
+		backdrop-filter: blur(10px);
+		color: #8b7ba8;
+		font-weight: 600;
+		font-family: inherit;
+		font-size: 0.95rem;
+		padding: 0.65rem 1.2rem;
+		border-radius: 50px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		transition:
+			transform 0.2s ease,
+			box-shadow 0.2s ease,
+			background 0.2s ease,
+			color 0.2s ease;
+		box-shadow: 0 4px 12px rgba(107, 76, 154, 0.08);
+		position: relative;
+	}
+
+	.category-tab:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 18px rgba(107, 76, 154, 0.15);
+		color: var(--category-color);
+		background: rgba(255, 255, 255, 0.9);
+	}
+
+	.category-tab.active {
+		background: linear-gradient(135deg, #ffd6e8 0%, #e8d6ff 100%);
+		color: var(--category-color);
+		box-shadow: 0 6px 18px color-mix(in srgb, var(--category-color) 25%, transparent);
+	}
+
+	.category-tab.active::before {
+		content: '';
+		position: absolute;
+		bottom: 0;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 60%;
+		height: 3px;
+		background: var(--category-color);
+		border-radius: 2px 2px 0 0;
+	}
+
+	.category-tab .tab-icon {
+		font-size: 1.1rem;
+		line-height: 1;
+	}
+
+	.category-tab .tab-label {
+		line-height: 1;
+	}
+
+	.category-tab .tab-count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 18px;
+		height: 18px;
+		padding: 0 0.35rem;
+		background: rgba(107, 76, 154, 0.15);
+		color: var(--category-color);
+		border-radius: 9px;
+		font-size: 0.7rem;
+		font-weight: 700;
+		line-height: 1;
+	}
+
+	.category-tab.active .tab-count {
+		background: var(--category-color);
+		color: white;
 	}
 
 	/* 下载按钮 */
@@ -1470,14 +1646,31 @@
 
 	.no-downloads {
 		text-align: center;
-		padding: 2rem;
+		padding: 3rem 2rem;
 		color: #8b7ba8;
+		background: rgba(255, 255, 255, 0.6);
+		border-radius: 20px;
+		backdrop-filter: blur(10px);
 	}
 
 	.no-downloads span {
-		font-size: 3rem;
+		font-size: 4rem;
 		display: block;
-		margin-bottom: 0.5rem;
+		margin-bottom: 1rem;
+		animation: float 3s ease-in-out infinite;
+	}
+
+	.no-downloads p {
+		margin: 0.5rem 0;
+		font-size: 1.1rem;
+		font-weight: 600;
+		color: #6b4c9a;
+	}
+
+	.no-downloads .hint {
+		font-size: 0.9rem;
+		font-weight: 400;
+		color: #a89bc4;
 	}
 
 	/* 底部 */

@@ -5,8 +5,15 @@
 		ApiResponse,
 		Platform,
 		StorageType,
-		S3Config
+		S3Config,
+		Category,
+		CategoryList
 	} from '$lib/types';
+	import { resolve } from '$app/paths';
+	import { SvelteSet } from 'svelte/reactivity';
+	import EmojiPicker from '$lib/components/EmojiPicker.svelte';
+	import ColorPicker from '$lib/components/ColorPicker.svelte';
+	import DraggableList from '$lib/components/DraggableList.svelte';
 
 	// 认证状态
 	let isAuthenticated = $state(false);
@@ -28,6 +35,26 @@
 	let error = $state('');
 	let success = $state('');
 
+	// 分类相关
+	let categories = $state<Category[]>([]);
+	let categoryLoading = $state(false);
+	let categorySaving = $state(false);
+	let categoryError = $state('');
+	let categorySuccess = $state('');
+	let showCategoryForm = $state(false);
+	let editingCategoryId = $state<string | null>(null);
+	let formCategoryName = $state('');
+	let formCategoryIcon = $state('');
+	let formCategoryColor = $state('');
+	let formCategoryDescription = $state('');
+	let formCategoryOrder = $state(0);
+	let showEmojiPicker = $state(false);
+	let showColorPicker = $state(false);
+
+	// 批量操作
+	let selectedDownloadIds = new SvelteSet<string>();
+	let showBulkActions = $state(false);
+
 	// 表单状态
 	let formPlatform = $state<Platform>('windows');
 	let formTitle = $state('');
@@ -45,8 +72,10 @@
 	let formS3PublicUrl = $state('');
 	let formS3Region = $state('auto');
 
-	// 编辑状态
-	let editingId = $state<string | null>(null);
+	// 下载项分类字段
+	let formCategoryId = $state<string | undefined>(undefined);
+
+	// 编辑状态（移除未使用的 editingId）
 
 	// 检查是否需要 Turnstile
 	async function checkTurnstileRequired() {
@@ -64,8 +93,8 @@
 					loadTurnstileScript();
 				}
 			}
-		} catch (e) {
-			console.error('Failed to check turnstile status:', e);
+		} catch (error) {
+			console.error('Failed to check turnstile status:', error);
 		}
 	}
 
@@ -175,10 +204,11 @@
 				failureCount?: number;
 			}> = await res.json();
 			if (data.success && data.data?.token) {
-				// 保存 token 到 sessionStorage
-				sessionStorage.setItem('admin_token', data.data.token);
+				// 保存 token 到 localStorage
+				localStorage.setItem('admin_token', data.data.token);
 				isAuthenticated = true;
 				loadDownloads();
+				loadCategories();
 			} else {
 				authError = data.error || '密码错误';
 
@@ -194,7 +224,7 @@
 					resetTurnstile();
 				}
 			}
-		} catch (e) {
+		} catch {
 			authError = '网络错误';
 			if (requireTurnstile) {
 				resetTurnstile();
@@ -206,21 +236,296 @@
 
 	// 登出
 	function handleLogout() {
-		sessionStorage.removeItem('admin_token');
+		localStorage.removeItem('admin_token');
 		isAuthenticated = false;
 		authPassword = '';
 	}
 
 	// 检查是否已登录
 	async function checkAuth() {
-		const token = sessionStorage.getItem('admin_token');
+		const token = localStorage.getItem('admin_token');
 		if (token) {
 			isAuthenticated = true;
 			loadDownloads();
+			loadCategories();
 		} else {
 			loading = false;
 			// 未登录时检查是否需要 Turnstile
 			await checkTurnstileRequired();
+		}
+	}
+
+	// 加载分类列表
+	async function loadCategories() {
+		categoryLoading = true;
+		categoryError = '';
+		try {
+			const token = localStorage.getItem('admin_token');
+			const res = await fetch('/api/admin/categories', {
+				headers: { Authorization: `Bearer ${token}` }
+			});
+			const data: ApiResponse<CategoryList> = await res.json();
+			if (data.success && data.data) {
+				categories = data.data.items;
+			} else {
+				if (res.status === 401) {
+					handleLogout();
+				}
+				categoryError = data.error || '加载分类失败';
+			}
+		} catch {
+			categoryError = '网络错误';
+		} finally {
+			categoryLoading = false;
+		}
+	}
+
+	// 打开分类表单
+	function openCategoryForm(category?: Category) {
+		if (category) {
+			editingCategoryId = category.id;
+			formCategoryName = category.name;
+			formCategoryIcon = category.icon || '';
+			formCategoryColor = category.color || '';
+			formCategoryDescription = category.description || '';
+			formCategoryOrder = category.order;
+		} else {
+			editingCategoryId = null;
+			formCategoryName = '';
+			formCategoryIcon = '';
+			formCategoryColor = '';
+			formCategoryDescription = '';
+			formCategoryOrder = categories.length;
+		}
+		showCategoryForm = true;
+		showEmojiPicker = false;
+		showColorPicker = false;
+		categorySuccess = '';
+		categoryError = '';
+	}
+
+	function closeCategoryForm() {
+		showCategoryForm = false;
+		editingCategoryId = null;
+		formCategoryName = '';
+		formCategoryIcon = '';
+		formCategoryColor = '';
+		formCategoryDescription = '';
+		formCategoryOrder = 0;
+		showEmojiPicker = false;
+		showColorPicker = false;
+	}
+
+	// 保存分类
+	async function handleSaveCategory() {
+		if (!formCategoryName.trim()) {
+			categoryError = '请输入分类名称';
+			return;
+		}
+
+		categorySaving = true;
+		categoryError = '';
+
+		try {
+			const token = localStorage.getItem('admin_token');
+			const url = editingCategoryId ? '/api/admin/categories' : '/api/admin/categories';
+			const method = editingCategoryId ? 'PUT' : 'POST';
+			const body = editingCategoryId
+				? JSON.stringify({
+						id: editingCategoryId,
+						name: formCategoryName.trim(),
+						icon: formCategoryIcon.trim() || undefined,
+						color: formCategoryColor.trim() || undefined,
+						description: formCategoryDescription.trim() || undefined,
+						order: formCategoryOrder
+					})
+				: JSON.stringify({
+						name: formCategoryName.trim(),
+						icon: formCategoryIcon.trim() || undefined,
+						color: formCategoryColor.trim() || undefined,
+						description: formCategoryDescription.trim() || undefined,
+						order: formCategoryOrder
+					});
+
+			const res = await fetch(url, {
+				method,
+				headers: {
+					'Content-Type': 'application/json',
+					...(token ? { Authorization: `Bearer ${token}` } : {})
+				},
+				body
+			});
+
+			const data: ApiResponse<Category> = await res.json();
+			if (data.success && data.data) {
+				if (editingCategoryId) {
+					categories = categories.map((c) => (c.id === editingCategoryId ? data.data! : c));
+					categorySuccess = '更新成功！';
+				} else {
+					categories = [...categories, data.data];
+					categorySuccess = '添加成功！';
+				}
+				closeCategoryForm();
+				await loadCategories(); // 重新加载以确保排序正确
+			} else {
+				categoryError = data.error || '保存失败';
+			}
+		} catch {
+			categoryError = '网络错误';
+		} finally {
+			categorySaving = false;
+		}
+	}
+
+	// 删除分类
+	async function handleDeleteCategory(id: string) {
+		// 检查是否有下载项使用该分类
+		const itemsInCategory = downloads.filter((d) => d.categoryId === id);
+		const confirmMsg =
+			itemsInCategory.length > 0
+				? `该分类下有 ${itemsInCategory.length} 个下载项，确定要删除吗？删除后这些下载项将变为无分类。`
+				: '确定要删除这个分类吗？';
+
+		if (!confirm(confirmMsg)) return;
+
+		try {
+			const token = localStorage.getItem('admin_token');
+			const res = await fetch('/api/admin/categories', {
+				method: 'DELETE',
+				headers: {
+					'Content-Type': 'application/json',
+					...(token ? { Authorization: `Bearer ${token}` } : {})
+				},
+				body: JSON.stringify({ id })
+			});
+
+			const data: ApiResponse = await res.json();
+			if (data.success) {
+				categories = categories.filter((c) => c.id !== id);
+				categorySuccess = '删除成功！';
+				// 如果有下载项使用该分类，重新加载下载列表
+				if (itemsInCategory.length > 0) {
+					await loadDownloads();
+				}
+			} else {
+				categoryError = data.error || '删除失败';
+			}
+		} catch {
+			categoryError = '网络错误';
+		}
+	}
+
+	// 处理分类拖放排序
+	async function handleCategoryReorder(reorderedCategories: Category[]) {
+		categories = reorderedCategories;
+
+		// 批量更新分类顺序
+		try {
+			const token = localStorage.getItem('admin_token');
+			for (const category of reorderedCategories) {
+				await fetch('/api/admin/categories', {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						...(token ? { Authorization: `Bearer ${token}` } : {})
+					},
+					body: JSON.stringify({
+						id: category.id,
+						name: category.name,
+						icon: category.icon,
+						color: category.color,
+						description: category.description,
+						order: category.order
+					})
+				});
+			}
+			categorySuccess = '排序已更新！';
+		} catch {
+			categoryError = '更新排序失败';
+		}
+	}
+
+	// 计算每个分类的下载数量
+	function getCategoryDownloadCount(categoryId: string): number {
+		return downloads.filter((d) => d.enabled && d.categoryId === categoryId).length;
+	}
+
+	// 批量操作：全选/取消全选
+	function toggleSelectAll() {
+		if (selectedDownloadIds.size === downloads.length) {
+			selectedDownloadIds.clear();
+		} else {
+			selectedDownloadIds.clear();
+			for (const download of downloads) {
+				selectedDownloadIds.add(download.id);
+			}
+		}
+	}
+
+	// 批量操作：移动到分类
+	async function handleBulkMoveToCategory(categoryId: string | null) {
+		if (selectedDownloadIds.size === 0) {
+			error = '请先选择要移动的下载项';
+			return;
+		}
+
+		try {
+			const token = localStorage.getItem('admin_token');
+			for (const itemId of selectedDownloadIds) {
+				const item = downloads.find((d) => d.id === itemId);
+				if (!item) continue;
+
+				await fetch('/api/admin', {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						...(token ? { Authorization: `Bearer ${token}` } : {})
+					},
+					body: JSON.stringify({
+						id: itemId,
+						categoryId,
+						enabled: item.enabled
+					})
+				});
+			}
+
+			success = `成功移动 ${selectedDownloadIds.size} 个下载项！`;
+			selectedDownloadIds.clear();
+			showBulkActions = false;
+			await loadDownloads();
+		} catch {
+			error = '批量移动失败';
+		}
+	}
+
+	// 批量操作：删除
+	async function handleBulkDelete() {
+		if (selectedDownloadIds.size === 0) {
+			error = '请先选择要删除的下载项';
+			return;
+		}
+
+		if (!confirm(`确定要删除选中的 ${selectedDownloadIds.size} 个下载项吗？`)) return;
+
+		try {
+			const token = localStorage.getItem('admin_token');
+			for (const itemId of selectedDownloadIds) {
+				await fetch('/api/admin', {
+					method: 'DELETE',
+					headers: {
+						'Content-Type': 'application/json',
+						...(token ? { Authorization: `Bearer ${token}` } : {})
+					},
+					body: JSON.stringify({ id: itemId })
+				});
+			}
+
+			success = `成功删除 ${selectedDownloadIds.size} 个下载项！`;
+			selectedDownloadIds.clear();
+			showBulkActions = false;
+			await loadDownloads();
+		} catch {
+			error = '批量删除失败';
 		}
 	}
 
@@ -229,7 +534,7 @@
 		loading = true;
 		error = '';
 		try {
-			const token = sessionStorage.getItem('admin_token');
+			const token = localStorage.getItem('admin_token');
 			const res = await fetch('/api/admin', {
 				headers: { Authorization: `Bearer ${token}` }
 			});
@@ -243,7 +548,7 @@
 				}
 				error = data.error || '加载失败';
 			}
-		} catch (e) {
+		} catch {
 			error = '网络错误';
 		} finally {
 			loading = false;
@@ -279,6 +584,10 @@
 			formData.append('version', formVersion);
 			formData.append('size', formSize);
 			formData.append('storageType', formStorageType);
+
+			if (formCategoryId) {
+				formData.append('categoryId', formCategoryId);
+			}
 
 			if (formStorageType === 'link') {
 				if (!formUrl) {
@@ -316,7 +625,7 @@
 				}
 			}
 
-			const token = sessionStorage.getItem('admin_token');
+			const token = localStorage.getItem('admin_token');
 			const res = await fetch('/api/admin', {
 				method: 'POST',
 				headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -331,7 +640,7 @@
 			} else {
 				error = data.error || '添加失败';
 			}
-		} catch (e) {
+		} catch {
 			error = '网络错误';
 		} finally {
 			saving = false;
@@ -341,7 +650,7 @@
 	// 切换启用状态
 	async function toggleEnabled(item: DownloadItem) {
 		try {
-			const token = sessionStorage.getItem('admin_token');
+			const token = localStorage.getItem('admin_token');
 			const res = await fetch('/api/admin', {
 				method: 'PUT',
 				headers: {
@@ -355,7 +664,7 @@
 			if (data.success && data.data) {
 				downloads = downloads.map((d) => (d.id === item.id ? data.data! : d));
 			}
-		} catch (e) {
+		} catch {
 			error = '更新失败';
 		}
 	}
@@ -365,7 +674,7 @@
 		if (!confirm('确定要删除吗？')) return;
 
 		try {
-			const token = sessionStorage.getItem('admin_token');
+			const token = localStorage.getItem('admin_token');
 			const res = await fetch('/api/admin', {
 				method: 'DELETE',
 				headers: {
@@ -382,7 +691,7 @@
 			} else {
 				error = data.error || '删除失败';
 			}
-		} catch (e) {
+		} catch {
 			error = '网络错误';
 		}
 	}
@@ -404,7 +713,7 @@
 		formS3PresignedUrl = '';
 		formS3PublicUrl = '';
 		formS3Region = 'auto';
-		editingId = null;
+		formCategoryId = undefined;
 	}
 
 	// 文件选择处理
@@ -449,7 +758,10 @@
 		}
 	}
 
-	function getAdminDownloadUrl(item: DownloadItem): string {
+	function resolveAdminDownloadUrl(item: DownloadItem): string {
+		if (item.storageType === 'link') {
+			return item.url; // link类型的URL已经是完整的外部URL，直接返回
+		}
 		return item.signedUrl || item.url;
 	}
 
@@ -559,6 +871,217 @@
 			</div>
 		{/if}
 
+		<!-- 分类管理区 -->
+		<section class="form-section">
+			<div class="section-header">
+				<h2>🗂️ 分类管理</h2>
+				<button class="btn btn-primary btn-small" onclick={() => openCategoryForm()}>
+					+ 添加分类
+				</button>
+			</div>
+
+			{#if categoryError}
+				<div class="alert alert-error">
+					<span>❌</span>
+					{categoryError}
+					<button class="alert-close" onclick={() => (categoryError = '')}>×</button>
+				</div>
+			{/if}
+
+			{#if categorySuccess}
+				<div class="alert alert-success">
+					<span>✅</span>
+					{categorySuccess}
+					<button class="alert-close" onclick={() => (categorySuccess = '')}>×</button>
+				</div>
+			{/if}
+
+			{#if categoryLoading}
+				<div class="loading">
+					<div class="spinner large"></div>
+					<p>加载中...</p>
+				</div>
+			{:else if categories.length === 0}
+				<div class="empty-state">
+					<span class="empty-icon">📂</span>
+					<p>暂无分类</p>
+					<p class="empty-hint">点击上方按钮添加第一个分类～</p>
+				</div>
+			{:else}
+				<DraggableList items={categories} onreorder={handleCategoryReorder}>
+					{#snippet children(category: Category)}
+						<div class="category-icon-wrapper">
+							{#if category.color}
+								<div class="category-color-dot" style:background-color={category.color}></div>
+							{/if}
+							<div class="category-icon">{category.icon || '📁'}</div>
+						</div>
+						<div class="category-info">
+							<div class="category-name-row">
+								<span class="category-name">{category.name}</span>
+								<span class="category-count-badge">{getCategoryDownloadCount(category.id)}</span>
+							</div>
+							{#if category.description}
+								<div class="category-desc">{category.description}</div>
+							{/if}
+							<div class="category-meta">
+								排序: {category.order}
+								{#if category.color}
+									<span class="color-preview" style:background-color={category.color}
+										>{category.color}</span
+									>
+								{/if}
+							</div>
+						</div>
+						<div class="category-actions">
+							<button class="btn btn-small" onclick={() => openCategoryForm(category)}>
+								编辑
+							</button>
+							<button
+								class="btn btn-small btn-danger"
+								onclick={() => handleDeleteCategory(category.id)}
+							>
+								删除
+							</button>
+						</div>
+					{/snippet}
+				</DraggableList>
+			{/if}
+		</section>
+
+		{#if showCategoryForm}
+			<div class="modal-backdrop" role="dialog" aria-modal="true">
+				<button
+					type="button"
+					class="modal-scrim"
+					onclick={closeCategoryForm}
+					onkeydown={(e) =>
+						(e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && closeCategoryForm()}
+					aria-label="关闭"
+				></button>
+				<div class="modal-card modal-lg">
+					<div class="modal-header">
+						<h3>{editingCategoryId ? '编辑分类' : '添加分类'}</h3>
+						<button class="modal-close" onclick={closeCategoryForm}>×</button>
+					</div>
+
+					{#if categoryError}
+						<p class="auth-error">{categoryError}</p>
+					{/if}
+
+					<div class="auth-form modal-form-grid">
+						<div class="form-group">
+							<label for="categoryName">分类名称</label>
+							<input
+								id="categoryName"
+								type="text"
+								bind:value={formCategoryName}
+								placeholder="例如：工具"
+							/>
+						</div>
+
+						<div class="form-group">
+							<label for="categoryDesc">描述（可选）</label>
+							<textarea
+								id="categoryDesc"
+								bind:value={formCategoryDescription}
+								placeholder="简单描述这个分类"
+								rows="2"
+							></textarea>
+						</div>
+
+						<div class="form-group">
+							<label for="categoryIcon">图标（emoji）</label>
+							<div class="icon-input-group">
+								<input
+									id="categoryIcon"
+									type="text"
+									bind:value={formCategoryIcon}
+									placeholder="🔧"
+									readonly
+									onclick={() => (showEmojiPicker = !showEmojiPicker)}
+								/>
+								<button
+									type="button"
+									class="btn btn-small"
+									onclick={() => (showEmojiPicker = !showEmojiPicker)}
+								>
+									{showEmojiPicker ? '收起' : '选择'}
+								</button>
+							</div>
+							{#if showEmojiPicker}
+								<div class="picker-container">
+									<EmojiPicker
+										value={formCategoryIcon}
+										onselect={(emoji) => {
+											formCategoryIcon = emoji;
+											showEmojiPicker = false;
+										}}
+									/>
+								</div>
+							{/if}
+						</div>
+
+						<div class="form-group">
+							<label for="categoryColor">分类颜色（可选）</label>
+							<div class="color-input-group">
+								<input
+									id="categoryColor"
+									type="text"
+									bind:value={formCategoryColor}
+									placeholder="#667EEA"
+									readonly
+									onclick={() => (showColorPicker = !showColorPicker)}
+								/>
+								<button
+									type="button"
+									class="btn btn-small"
+									onclick={() => (showColorPicker = !showColorPicker)}
+								>
+									{showColorPicker ? '收起' : '选择'}
+								</button>
+								{#if formCategoryColor}
+									<div class="color-indicator" style:background-color={formCategoryColor}></div>
+								{/if}
+							</div>
+							{#if showColorPicker}
+								<div class="picker-container">
+									<ColorPicker
+										value={formCategoryColor}
+										onselect={(color) => {
+											formCategoryColor = color;
+										}}
+									/>
+								</div>
+							{/if}
+						</div>
+
+						<div class="form-group">
+							<label for="categoryOrder">排序</label>
+							<input
+								id="categoryOrder"
+								type="number"
+								bind:value={formCategoryOrder}
+								placeholder="0"
+							/>
+							<p class="field-hint">数字越小越靠前，支持拖放排序</p>
+						</div>
+					</div>
+
+					<div class="modal-footer">
+						<button class="btn btn-secondary" onclick={closeCategoryForm}> 取消 </button>
+						<button class="btn btn-primary" onclick={handleSaveCategory} disabled={categorySaving}>
+							{#if categorySaving}
+								<span class="spinner"></span> 保存中...
+							{:else}
+								保存
+							{/if}
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
+
 		<!-- 添加表单 -->
 		<section class="form-section">
 			<h2>✨ 添加下载项</h2>
@@ -576,6 +1099,16 @@
 				<div class="form-group">
 					<label for="version">版本号</label>
 					<input id="version" type="text" bind:value={formVersion} placeholder="v1.0.0" />
+				</div>
+
+				<div class="form-group">
+					<label for="category">分类</label>
+					<select id="category" bind:value={formCategoryId}>
+						<option value={undefined}>无分类</option>
+						{#each categories as category (category.id)}
+							<option value={category.id}>{category.icon || ''} {category.name}</option>
+						{/each}
+					</select>
 				</div>
 
 				<div class="form-group">
@@ -714,7 +1247,60 @@
 
 		<!-- 下载列表 -->
 		<section class="list-section">
-			<h2>📋 下载列表</h2>
+			<div class="section-header">
+				<h2>📋 下载列表</h2>
+				{#if downloads.length > 0}
+					<button
+						class="btn btn-small"
+						class:btn-primary={!showBulkActions}
+						onclick={() => {
+							showBulkActions = !showBulkActions;
+							if (!showBulkActions) {
+								selectedDownloadIds.clear();
+							}
+						}}
+					>
+						{showBulkActions ? '取消批量操作' : '批量操作'}
+					</button>
+				{/if}
+			</div>
+
+			{#if showBulkActions && downloads.length > 0}
+				<div class="bulk-actions-bar">
+					<label class="checkbox-label">
+						<input
+							type="checkbox"
+							checked={selectedDownloadIds.size === downloads.length}
+							onchange={toggleSelectAll}
+						/>
+						<span>全选 ({selectedDownloadIds.size} / {downloads.length})</span>
+					</label>
+
+					{#if selectedDownloadIds.size > 0}
+						<div class="bulk-action-buttons">
+							<select
+								class="bulk-category-select"
+								onchange={(e) => {
+									const select = e.target as HTMLSelectElement;
+									if (!select.value) return;
+									const value = select.value === '__none__' ? null : select.value;
+									handleBulkMoveToCategory(value);
+									select.value = '';
+								}}
+							>
+								<option value="">移动到分类...</option>
+								<option value="__none__">（无分类）</option>
+								{#each categories as category (category.id)}
+									<option value={category.id}>{category.icon || ''} {category.name}</option>
+								{/each}
+							</select>
+							<button class="btn btn-small btn-danger" onclick={handleBulkDelete}>
+								删除选中 ({selectedDownloadIds.size})
+							</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
 
 			{#if loading}
 				<div class="loading">
@@ -731,6 +1317,21 @@
 				<div class="download-list">
 					{#each downloads as item (item.id)}
 						<div class="download-item" class:disabled={!item.enabled}>
+							{#if showBulkActions}
+								<label class="item-checkbox">
+									<input
+										type="checkbox"
+										checked={selectedDownloadIds.has(item.id)}
+										onchange={() => {
+											if (selectedDownloadIds.has(item.id)) {
+												selectedDownloadIds.delete(item.id);
+											} else {
+												selectedDownloadIds.add(item.id);
+											}
+										}}
+									/>
+								</label>
+							{/if}
 							<div class="item-icon">{getPlatformIcon(item.platform)}</div>
 							<div class="item-info">
 								<div class="item-title">
@@ -738,6 +1339,21 @@
 									<span class="badge badge-{item.storageType}"
 										>{getStorageLabel(item.storageType)}</span
 									>
+									{#if item.categoryId}
+										{@const cat = categories.find((c) => c.id === item.categoryId)}
+										{#if cat}
+											<span
+												class="badge badge-category"
+												style:background-color={cat.color
+													? `${cat.color}15`
+													: 'rgba(107, 76, 154, 0.08)'}
+												style:color={cat.color || '#6b4c9a'}
+											>
+												{cat.icon || ''}
+												{cat.name}
+											</span>
+										{/if}
+									{/if}
 								</div>
 								<div class="item-meta">
 									<span>📦 {item.size}</span>
@@ -755,8 +1371,11 @@
 										</span>
 									{/if}
 									<span
-										>🔗 <a href={getAdminDownloadUrl(item)} target="_blank" rel="noopener"
-											>{item.url.slice(0, 50)}...</a
+										>🔗 <a
+											href={resolveAdminDownloadUrl(item)}
+											target="_blank"
+											rel="noopener"
+											onclick={(event) => event.stopPropagation()}>{item.url.slice(0, 50)}...</a
 										></span
 									>
 								</div>
@@ -1032,6 +1651,17 @@
 		border-radius: 20px;
 		padding: 2rem;
 		box-shadow: 0 8px 25px rgba(107, 76, 154, 0.12);
+	}
+
+	.section-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1.5rem;
+	}
+
+	.section-header h2 {
+		margin: 0;
 	}
 
 	.form-section h2,
@@ -1324,6 +1954,325 @@
 		color: #16a34a;
 	}
 
+	/* 分类列表 */
+	.category-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.category-item {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 1rem 1.25rem;
+		background: rgba(255, 255, 255, 0.8);
+		backdrop-filter: blur(8px);
+		border-radius: 14px;
+		transition: all 0.3s ease;
+		box-shadow: 0 4px 12px rgba(107, 76, 154, 0.06);
+	}
+
+	.category-item:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 8px 20px rgba(107, 76, 154, 0.1);
+	}
+
+	.category-icon {
+		font-size: 1.8rem;
+		flex-shrink: 0;
+	}
+
+	.category-info {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.category-name {
+		font-weight: 600;
+		color: #6b4c9a;
+		font-size: 1.05rem;
+	}
+
+	.category-meta {
+		font-size: 0.85rem;
+		color: #8b7ba8;
+		margin-top: 0.2rem;
+	}
+
+	.category-actions {
+		display: flex;
+		gap: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.modal-backdrop {
+		position: fixed;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		background: rgba(17, 8, 28, 0.4);
+		backdrop-filter: blur(6px);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+		padding: 1.5rem;
+	}
+
+	.modal-scrim {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		border: none;
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.modal-card {
+		width: 100%;
+		max-width: 480px;
+		background: rgba(255, 255, 255, 0.95);
+		border-radius: 20px;
+		padding: 1.75rem;
+		box-shadow: 0 20px 50px rgba(107, 76, 154, 0.25);
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		position: relative;
+		z-index: 1;
+	}
+
+	.modal-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.modal-header h3 {
+		margin: 0;
+		font-family: 'Fredoka', sans-serif;
+		color: #6b4c9a;
+		font-size: 1.3rem;
+	}
+
+	.modal-close {
+		border: none;
+		background: rgba(107, 76, 154, 0.1);
+		color: #6b4c9a;
+		width: 34px;
+		height: 34px;
+		border-radius: 50%;
+		cursor: pointer;
+		font-size: 1.3rem;
+		line-height: 1;
+		transition: all 0.3s ease;
+	}
+
+	.modal-close:hover {
+		background: rgba(107, 76, 154, 0.2);
+		transform: translateY(-1px);
+	}
+
+	.modal-footer {
+		display: flex;
+		gap: 0.75rem;
+		justify-content: flex-end;
+		margin-top: 0.5rem;
+	}
+
+	.auth-form {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.auth-error {
+		color: #ff6b9d;
+		font-size: 0.9rem;
+		margin: 0;
+		text-align: left;
+		background: rgba(255, 107, 157, 0.1);
+		padding: 0.75rem;
+		border-radius: 8px;
+	}
+
+	/* 新增样式 */
+
+	/* 分类拖放列表增强 */
+	.category-icon-wrapper {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		position: relative;
+		flex-shrink: 0;
+	}
+
+	.category-color-dot {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+	}
+
+	.category-name-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.category-count-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 20px;
+		height: 20px;
+		padding: 0 0.4rem;
+		background: linear-gradient(135deg, #ff6b9d 0%, #6b4c9a 100%);
+		color: white;
+		border-radius: 10px;
+		font-size: 0.75rem;
+		font-weight: 600;
+	}
+
+	.category-desc {
+		font-size: 0.85rem;
+		color: #8b7ba8;
+		margin-top: 0.2rem;
+		line-height: 1.4;
+	}
+
+	.color-preview {
+		display: inline-block;
+		padding: 0.15rem 0.5rem;
+		border-radius: 6px;
+		font-size: 0.75rem;
+		font-family: monospace;
+		border: 1px solid rgba(107, 76, 154, 0.2);
+		background: rgba(255, 255, 255, 0.8);
+	}
+
+	/* 模态框增强 */
+	.modal-lg {
+		max-width: 680px;
+	}
+
+	.modal-form-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1rem;
+	}
+
+	.modal-form-grid .form-group:first-child,
+	.modal-form-grid .form-group:nth-child(2) {
+		grid-column: 1 / -1;
+	}
+
+	.icon-input-group,
+	.color-input-group {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
+	.icon-input-group input,
+	.color-input-group input {
+		flex: 1;
+		cursor: pointer;
+	}
+
+	.color-indicator {
+		width: 32px;
+		height: 32px;
+		border-radius: 8px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+		border: 2px solid rgba(255, 255, 255, 0.8);
+		flex-shrink: 0;
+	}
+
+	.picker-container {
+		margin-top: 0.75rem;
+	}
+
+	.field-hint {
+		margin: 0.25rem 0 0;
+		font-size: 0.8rem;
+		color: #a89bc4;
+	}
+
+	/* 批量操作样式 */
+	.bulk-actions-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 1rem 1.5rem;
+		background: rgba(255, 240, 247, 0.6);
+		border-radius: 14px;
+		margin-bottom: 1rem;
+		border: 2px dashed rgba(107, 76, 154, 0.15);
+	}
+
+	.checkbox-label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
+		font-weight: 500;
+		color: #6b4c9a;
+		user-select: none;
+	}
+
+	.checkbox-label input[type='checkbox'] {
+		width: 18px;
+		height: 18px;
+		cursor: pointer;
+	}
+
+	.bulk-action-buttons {
+		display: flex;
+		gap: 0.75rem;
+		align-items: center;
+	}
+
+	.bulk-category-select {
+		padding: 0.5rem 1rem;
+		border: 2px solid rgba(107, 76, 154, 0.2);
+		border-radius: 10px;
+		font-size: 0.9rem;
+		font-family: inherit;
+		background: white;
+		color: #6b4c9a;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.bulk-category-select:hover {
+		border-color: #6b4c9a;
+	}
+
+	.item-checkbox {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		padding: 0 0.5rem;
+	}
+
+	.item-checkbox input[type='checkbox'] {
+		width: 18px;
+		height: 18px;
+		cursor: pointer;
+	}
+
+	.badge-category {
+		background: rgba(107, 76, 154, 0.08);
+		color: #6b4c9a;
+	}
+
 	/* 响应式 */
 	@media (max-width: 768px) {
 		.admin-container {
@@ -1348,6 +2297,24 @@
 		.item-actions {
 			width: 100%;
 			justify-content: flex-end;
+		}
+
+		.modal-form-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.bulk-actions-bar {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+
+		.bulk-action-buttons {
+			width: 100%;
+			flex-direction: column;
+		}
+
+		.bulk-category-select {
+			width: 100%;
 		}
 	}
 </style>

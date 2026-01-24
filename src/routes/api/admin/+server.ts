@@ -131,6 +131,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const version = formData.get('version') as string;
 		const size = formData.get('size') as string;
 		const storageType = formData.get('storageType') as 'link' | 'r2' | 's3';
+		const categoryId = (formData.get('categoryId') as string) || undefined;
 
 		let url = '';
 		let s3Config: S3Config | undefined;
@@ -187,6 +188,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const item: DownloadItem = {
 			id: crypto.randomUUID(),
 			platform: platform_type as 'windows' | 'macos' | 'linux',
+			categoryId,
 			title: title || undefined,
 			description: description || undefined,
 			configGuide: configGuide || undefined,
@@ -238,6 +240,14 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 			});
 		}
 
+		const normalizedUpdates = { ...updates } as Record<string, unknown>;
+		if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'categoryId')) {
+			const value = normalizedUpdates.categoryId;
+			if (value === null || value === '') {
+				normalizedUpdates.categoryId = undefined;
+			}
+		}
+
 		const list = await getDownloadList(kv);
 		const index = list.items.findIndex((item) => item.id === id);
 
@@ -249,7 +259,7 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 
 		list.items[index] = {
 			...list.items[index],
-			...updates,
+			...normalizedUpdates,
 			updatedAt: Date.now()
 		};
 

@@ -66,7 +66,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			return json({ success: true, data: { count: 12580 } } satisfies ApiResponse);
 		}
 
-		const { itemId } = (await request.json()) as { itemId?: string };
+		await request.json();
 
 		const data = await kv.get<DownloadList>(KV_KEY, 'json');
 		if (data) {

@@ -1,58 +1,32 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import type { ApiResponse } from '$lib/types';
 import { issueAdminJwt } from '$lib/admin-auth';
+import {
+	verifyTurnstile,
+	FailureCounter,
+	getClientIp,
+	getTurnstileStatus,
+	FAILURE_THRESHOLD
+} from '$lib/turnstile';
 
-// 失败次数阈值，超过后需要 Turnstile 验证
-const FAILURE_THRESHOLD = 3;
-// 失败计数过期时间（秒）
-const FAILURE_TTL = 60 * 15; // 15 分钟
-
-// 验证 Turnstile token
-async function verifyTurnstile(token: string, secretKey: string, ip: string): Promise<boolean> {
-	const formData = new URLSearchParams();
-	formData.append('secret', secretKey);
-	formData.append('response', token);
-	formData.append('remoteip', ip);
-
-	const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-		body: formData
-	});
-
-	const result = (await response.json()) as { success: boolean };
-	return result.success;
-}
-
-// GET: 获取登录状态（是否需要 Turnstile）
 export const GET: RequestHandler = async ({ request, platform }) => {
 	const kv = platform?.env.APP_KV;
 	const siteKey = platform?.env.TURNSTILE_SITE_KEY || '';
+	const ip = getClientIp(request);
 
-	// 获取客户端 IP
-	const ip =
-		request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
-	const kvKey = `auth_failures:${ip}`;
-
-	let failureCount = 0;
-	if (kv) {
-		const stored = await kv.get(kvKey);
-		failureCount = stored ? parseInt(stored, 10) : 0;
-	}
-
-	const requireTurnstile = failureCount >= FAILURE_THRESHOLD;
+	const counter = new FailureCounter(kv, 'auth_failures');
+	const status = await getTurnstileStatus(counter, ip, siteKey);
 
 	return json({
 		success: true,
 		data: {
-			requireTurnstile,
-			siteKey: requireTurnstile ? siteKey : '',
-			failureCount
+			requireTurnstile: status.required,
+			siteKey: status.siteKey,
+			failureCount: status.failureCount
 		}
 	} satisfies ApiResponse<{ requireTurnstile: boolean; siteKey: string; failureCount: number }>);
 };
 
-// POST: 登录验证
 export const POST: RequestHandler = async ({ request, platform }) => {
 	try {
 		const { password, turnstileToken } = (await request.json()) as {
@@ -62,29 +36,19 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 		const kv = platform?.env.APP_KV;
 		const secretKey = platform?.env.TURNSTILE_SECRET_KEY || '';
+		const siteKey = platform?.env.TURNSTILE_SITE_KEY || '';
+		const ip = getClientIp(request);
 
-		// 获取客户端 IP
-		const ip =
-			request.headers.get('CF-Connecting-IP') ||
-			request.headers.get('X-Forwarded-For') ||
-			'unknown';
-		const kvKey = `auth_failures:${ip}`;
+		const counter = new FailureCounter(kv, 'auth_failures');
+		const failureCount = await counter.getCount(ip);
 
-		// 获取当前失败次数
-		let failureCount = 0;
-		if (kv) {
-			const stored = await kv.get(kvKey);
-			failureCount = stored ? parseInt(stored, 10) : 0;
-		}
-
-		// 如果失败次数超过阈值，需要验证 Turnstile
 		if (failureCount >= FAILURE_THRESHOLD) {
 			if (!turnstileToken) {
 				return json(
 					{
 						success: false,
 						error: '请完成人机验证',
-						data: { requireTurnstile: true, siteKey: platform?.env.TURNSTILE_SITE_KEY || '' }
+						data: { requireTurnstile: true, siteKey }
 					} satisfies ApiResponse<{ requireTurnstile: boolean; siteKey: string }>,
 					{ status: 400 }
 				);
@@ -96,24 +60,17 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 					{
 						success: false,
 						error: '人机验证失败，请重试',
-						data: { requireTurnstile: true, siteKey: platform?.env.TURNSTILE_SITE_KEY || '' }
+						data: { requireTurnstile: true, siteKey }
 					} satisfies ApiResponse<{ requireTurnstile: boolean; siteKey: string }>,
 					{ status: 400 }
 				);
 			}
 		}
 
-		// 从环境变量获取密码
 		const adminPassword = platform?.env.ADMIN_PASSWORD || 'admin123';
 
 		if (password !== adminPassword) {
-			// 增加失败计数
-			if (kv) {
-				const newCount = failureCount + 1;
-				await kv.put(kvKey, newCount.toString(), { expirationTtl: FAILURE_TTL });
-			}
-
-			const newFailureCount = failureCount + 1;
+			const newFailureCount = await counter.increment(ip);
 			const requireTurnstile = newFailureCount >= FAILURE_THRESHOLD;
 
 			return json(
@@ -124,7 +81,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 						: `密码错误，还有 ${FAILURE_THRESHOLD - newFailureCount} 次机会`,
 					data: {
 						requireTurnstile,
-						siteKey: requireTurnstile ? platform?.env.TURNSTILE_SITE_KEY || '' : '',
+						siteKey: requireTurnstile ? siteKey : '',
 						failureCount: newFailureCount
 					}
 				} satisfies ApiResponse<{
@@ -143,12 +100,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			});
 		}
 
-		// 登录成功，清除失败计数
-		if (kv) {
-			await kv.delete(kvKey);
-		}
+		await counter.clear(ip);
 
-		// 生成 JWT
 		const token = await issueAdminJwt(jwtSecret);
 
 		return json({ success: true, data: { token } } satisfies ApiResponse<{ token: string }>);
