@@ -200,7 +200,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			s3Config: undefined,
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
-			enabled: true
+			enabled: true,
+			downloadCount: 0
 		};
 
 		const list = await getDownloadList(kv);

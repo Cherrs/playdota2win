@@ -261,6 +261,11 @@
 						</div>
 						<div class="item-meta">
 							<span>📦 {item.size}</span>
+							<span class="download-count">
+								<span class="count-icon">📥</span>
+								<span class="count-value">{(item.downloadCount || 0).toLocaleString('zh-CN')}</span>
+								<span class="count-label">次下载</span>
+							</span>
 							{#if item.description}
 								<span>📝 {item.description}</span>
 							{/if}
@@ -539,6 +544,29 @@
 
 	.item-meta a:hover {
 		text-decoration: underline;
+	}
+
+	.download-count {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		background: rgba(107, 203, 119, 0.1);
+		padding: 0.15rem 0.5rem;
+		border-radius: 6px;
+	}
+
+	.count-icon {
+		font-size: 0.75rem;
+	}
+
+	.count-value {
+		font-weight: 600;
+		color: #2e8b57;
+	}
+
+	.count-label {
+		color: #6b8e7e;
+		font-size: 0.75rem;
 	}
 
 	.item-actions {

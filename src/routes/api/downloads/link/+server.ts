@@ -149,6 +149,11 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			console.log('[Download Link] Using direct URL:', url);
 		}
 
+		// 增加单项下载计数（接受最终一致性）
+		// 注意：读-修改-写模式在极少数并发情况下可能丢失约 0.1% 的更新
+		// 根据 research.md 中的架构决策，这个权衡是可接受的
+		item.downloadCount = (item.downloadCount || 0) + 1;
+		// 增加总下载计数
 		list.downloadCount = (list.downloadCount || 0) + 1;
 		await kv.put(KV_KEY, JSON.stringify(list));
 

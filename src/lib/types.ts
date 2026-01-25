@@ -67,6 +67,8 @@ export interface DownloadItem {
 	updatedAt: number;
 	/** 是否启用 */
 	enabled: boolean;
+	/** 下载次数（可选，默认为 0） */
+	downloadCount?: number;
 }
 
 /**
