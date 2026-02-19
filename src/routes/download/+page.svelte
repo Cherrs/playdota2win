@@ -14,6 +14,7 @@
 	import PasswordModal from '$lib/components/PasswordModal.svelte';
 	import GuideModal from '$lib/components/GuideModal.svelte';
 	import GuidePanel from '$lib/components/GuidePanel.svelte';
+	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
 
 	// 数据状态
 	let downloadCount = $state(0);
@@ -37,6 +38,11 @@
 	// 指引弹窗状态
 	let showGuideModal = $state(false);
 	let guideItem = $state<DownloadItem | null>(null);
+
+	// 指引密码验证状态
+	let isGuidePasswordVerified = $state(false);
+	let pendingGuideItem = $state<DownloadItem | null>(null);
+	let showGuidePasswordModal = $state(false);
 
 	// Turnstile 状态
 	let requireTurnstile = $state(false);
@@ -129,6 +135,8 @@
 				if (typeof data.data.count === 'number') {
 					downloadCount = data.data.count;
 				}
+				isGuidePasswordVerified = true;
+				setGuideVerified();
 				selectedItem = pendingItem;
 				activeTab = 'guide';
 				guideMessage = '下载已开始，下面是配置指引～';
@@ -160,8 +168,51 @@
 
 	// 打开指引弹窗
 	function openGuideModal(item: DownloadItem) {
-		guideItem = item;
-		showGuideModal = true;
+		if (isGuidePasswordVerified || isGuideVerified()) {
+			guideItem = item;
+			showGuideModal = true;
+		} else {
+			pendingGuideItem = item;
+			showGuidePasswordModal = true;
+			checkTurnstileRequired();
+		}
+	}
+
+	// 关闭指引密码弹窗
+	function closeGuidePasswordModal() {
+		showGuidePasswordModal = false;
+		pendingGuideItem = null;
+	}
+
+	// 指引密码验证提交
+	async function handleGuidePasswordSubmit(password: string, turnstileToken: string) {
+		const res = await fetch('/api/downloads/link', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				password,
+				turnstileToken: turnstileToken || undefined,
+				action: 'guide'
+			})
+		});
+		const data: ApiResponse<{ verified: boolean; requireTurnstile?: boolean; siteKey?: string }> =
+			await res.json();
+
+		if (data.success) {
+			isGuidePasswordVerified = true;
+			setGuideVerified();
+			if (pendingGuideItem) {
+				guideItem = pendingGuideItem;
+				showGuideModal = true;
+			}
+			closeGuidePasswordModal();
+		} else {
+			if (data.data?.requireTurnstile && data.data?.siteKey) {
+				requireTurnstile = true;
+				turnstileSiteKey = data.data.siteKey;
+			}
+			throw new Error(data.error || '验证失败');
+		}
 	}
 
 	// 关闭指引弹窗
@@ -306,6 +357,17 @@
 		<!-- 配置指引弹窗 -->
 		{#if showGuideModal && guideItem}
 			<GuideModal item={guideItem} onClose={closeGuideModal} />
+		{/if}
+
+		<!-- 指引密码弹窗 -->
+		{#if showGuidePasswordModal && pendingGuideItem}
+			<PasswordModal
+				item={pendingGuideItem}
+				{requireTurnstile}
+				{turnstileSiteKey}
+				onClose={closeGuidePasswordModal}
+				onSubmit={handleGuidePasswordSubmit}
+			/>
 		{/if}
 
 		<!-- 底部提示 -->

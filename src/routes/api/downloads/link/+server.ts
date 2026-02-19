@@ -41,12 +41,13 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 
 export const POST: RequestHandler = async ({ request, platform }) => {
 	try {
-		const { itemId, password, turnstileToken } = (await request.json()) as {
+		const { itemId, password, turnstileToken, action } = (await request.json()) as {
 			itemId?: string;
 			password?: string;
 			turnstileToken?: string;
+			action?: 'download' | 'guide';
 		};
-		if (!itemId) {
+		if (action !== 'guide' && !itemId) {
 			return json({ success: false, error: 'itemId is required' } satisfies ApiResponse, {
 				status: 400
 			});
@@ -120,6 +121,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		}
 
 		await counter.clear(ip);
+
+		if (action === 'guide') {
+			return json({
+				success: true,
+				data: { verified: true }
+			} satisfies ApiResponse<{ verified: boolean }>);
+		}
 
 		const data = await kv.get<DownloadList>(KV_KEY, 'json');
 		const list = data || { items: [], downloadCount: 12580, lastUpdated: Date.now() };
