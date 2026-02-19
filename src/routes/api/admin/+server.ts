@@ -84,8 +84,13 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 		}
 
 		const list = await getDownloadList(kv);
-		const signingSecret =
-			platform?.env.ADMIN_SIGNING_SECRET || platform?.env.ADMIN_PASSWORD || 'dev-secret';
+		const signingSecret = platform?.env.ADMIN_SIGNING_SECRET;
+		if (!signingSecret) {
+			return json(
+				{ success: false, error: 'Signing secret not configured' } satisfies ApiResponse,
+				{ status: 500 }
+			);
+		}
 		const items = await Promise.all(
 			list.items.map(async (item) => {
 				if (item.storageType === 'r2' && item.url.startsWith('/api/admin/download/')) {
@@ -133,6 +138,19 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const storageType = formData.get('storageType') as 'link' | 'r2' | 's3';
 		const categoryId = (formData.get('categoryId') as string) || undefined;
 
+		const allowedPlatforms = ['windows', 'macos', 'linux'] as const;
+		const allowedStorageTypes = ['link', 'r2', 's3'] as const;
+		if (!allowedPlatforms.includes(platform_type as (typeof allowedPlatforms)[number])) {
+			return json({ success: false, error: 'Invalid platform' } satisfies ApiResponse, {
+				status: 400
+			});
+		}
+		if (!allowedStorageTypes.includes(storageType)) {
+			return json({ success: false, error: 'Invalid storage type' } satisfies ApiResponse, {
+				status: 400
+			});
+		}
+
 		let url = '';
 		let s3Config: S3Config | undefined;
 		let uploadFilename: string | undefined;
@@ -173,7 +191,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 				);
 			}
 
-			s3Config = JSON.parse(s3ConfigStr) as S3Config;
+			try {
+				s3Config = JSON.parse(s3ConfigStr) as S3Config;
+			} catch {
+				return json({ success: false, error: 'Invalid S3 config' } satisfies ApiResponse, {
+					status: 400
+				});
+			}
 			uploadFilename = file.name;
 			const buffer = await file.arrayBuffer();
 			url = await uploadToS3(s3Config, buffer, file.type || 'application/octet-stream');
@@ -236,7 +260,6 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 		}
 
 		const body = (await request.json()) as { id: string; [key: string]: unknown };
-		console.log('PUT /api/admin: Received body:', body);
 
 		const { id, ...updates } = body;
 		if (!id) {
@@ -268,20 +291,13 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 			});
 		}
 
-		console.log('PUT /api/admin: Found item at index', index);
-		console.log('PUT /api/admin: Current item:', list.items[index]);
-		console.log('PUT /api/admin: Updates:', normalizedUpdates);
-
 		list.items[index] = {
 			...list.items[index],
 			...normalizedUpdates,
 			updatedAt: Date.now()
 		};
 
-		console.log('PUT /api/admin: Updated item:', list.items[index]);
-
 		await saveDownloadList(kv, list);
-		console.log('PUT /api/admin: Saved to KV successfully');
 
 		return json({ success: true, data: list.items[index] } satisfies ApiResponse<DownloadItem>);
 	} catch (error) {

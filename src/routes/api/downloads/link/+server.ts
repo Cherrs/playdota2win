@@ -131,22 +131,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		let url = item.url;
 		let filename = item.filename || getFilenameFromUrl(item.url);
 
-		console.log('[Download Link] Item details:', {
-			id: item.id,
-			storageType: item.storageType,
-			originalUrl: item.url,
-			filename: item.filename
-		});
-
 		if (item.storageType === 'r2' && item.url.startsWith('/api/admin/download/')) {
 			const key = item.url.replace('/api/admin/download/', '');
 			const token = generateDownloadToken();
 			await saveDownloadToken(token, kv, key);
 			url = `/api/downloads/relay/${key}?token=${token}`;
 			filename = item.filename || key.split('/').pop() || 'download';
-			console.log('[Download Link] Generated R2 relay URL:', url);
-		} else {
-			console.log('[Download Link] Using direct URL:', url);
 		}
 
 		// 增加单项下载计数（接受最终一致性）
@@ -156,14 +146,6 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// 增加总下载计数
 		list.downloadCount = (list.downloadCount || 0) + 1;
 		await kv.put(KV_KEY, JSON.stringify(list));
-
-		console.log('[Download Link] Final response:', {
-			url,
-			filename,
-			count: list.downloadCount,
-			originalItemUrl: item.url,
-			storageType: item.storageType
-		});
 
 		return json({
 			success: true,

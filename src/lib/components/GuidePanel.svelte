@@ -18,9 +18,9 @@
 
 	// Reset override when parent message changes
 	$effect(() => {
-		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-		message; // track
-		localOverride = null;
+		if (message !== undefined) {
+			localOverride = null;
+		}
 	});
 
 	function getPlatformLabel(platform: Platform): string {

@@ -3,6 +3,7 @@
 	import EmojiPicker from '$lib/components/EmojiPicker.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import DraggableList from '$lib/components/DraggableList.svelte';
+	import { trapFocus, focusFirstElement } from '$lib/utils/a11y';
 
 	interface Props {
 		categories: Category[];
@@ -31,6 +32,11 @@
 	let formOrder = $state(0);
 	let showEmojiPicker = $state(false);
 	let showColorPicker = $state(false);
+	let dialogRef = $state<HTMLDivElement | null>(null);
+	let closeButtonRef = $state<HTMLButtonElement | null>(null);
+	let lastFocusedElement: HTMLElement | null = null;
+	const titleId = crypto.randomUUID();
+	const errorId = crypto.randomUUID();
 
 	// 计算每个分类的下载数量
 	function getCategoryDownloadCount(categoryId: string): number {
@@ -72,6 +78,23 @@
 		showEmojiPicker = false;
 		showColorPicker = false;
 	}
+
+	$effect(() => {
+		if (!showForm) return;
+		lastFocusedElement =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		void focusFirstElement(dialogRef, closeButtonRef);
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				closeForm();
+			}
+		};
+		document.addEventListener('keydown', handleKeydown);
+		return () => {
+			document.removeEventListener('keydown', handleKeydown);
+			lastFocusedElement?.focus();
+		};
+	});
 
 	// 保存分类
 	async function handleSave() {
@@ -296,22 +319,18 @@
 </section>
 
 {#if showForm}
-	<div class="modal-backdrop" role="dialog" aria-modal="true">
-		<button
-			type="button"
-			class="modal-scrim"
-			onclick={closeForm}
-			onkeydown={(e) => (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && closeForm()}
-			aria-label="关闭"
-		></button>
-		<div class="modal-card modal-lg">
+	<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+		<button type="button" class="modal-scrim" onclick={closeForm} aria-label="关闭"></button>
+		<div class="modal-card modal-lg" bind:this={dialogRef} use:trapFocus tabindex="-1">
 			<div class="modal-header">
-				<h3>{editingId ? '编辑分类' : '添加分类'}</h3>
-				<button type="button" class="modal-close" onclick={closeForm}>×</button>
+				<h3 id={titleId}>{editingId ? '编辑分类' : '添加分类'}</h3>
+				<button type="button" class="modal-close" onclick={closeForm} bind:this={closeButtonRef}>
+					×
+				</button>
 			</div>
 
 			{#if error}
-				<p class="auth-error">{error}</p>
+				<p class="auth-error" id={errorId} role="alert" aria-live="assertive">{error}</p>
 			{/if}
 
 			<div class="auth-form modal-form-grid">
@@ -796,5 +815,22 @@
 
 	.picker-container {
 		margin-top: 0.5rem;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.btn,
+		.modal-close {
+			transition: none;
+		}
+
+		.btn:hover,
+		.modal-close:hover {
+			transform: none;
+			box-shadow: none;
+		}
+
+		.spinner {
+			animation: none;
+		}
 	}
 </style>

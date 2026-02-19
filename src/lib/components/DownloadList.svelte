@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { DownloadItem, Platform, StorageType, Category } from '$lib/types';
 
@@ -281,7 +282,6 @@
 							{/if}
 							<span>
 								🔗
-								<!-- eslint-disable svelte/no-navigation-without-resolve -->
 								<a
 									href={resolveDownloadUrl(item)}
 									target="_blank"
@@ -290,7 +290,6 @@
 								>
 									{item.url.slice(0, 50)}...
 								</a>
-								<!-- eslint-enable svelte/no-navigation-without-resolve -->
 							</span>
 						</div>
 					</div>

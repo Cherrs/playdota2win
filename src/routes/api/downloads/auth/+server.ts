@@ -12,7 +12,7 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 	const kv = platform?.env.APP_KV;
 	const token = request.headers.get('X-Download-Token');
 
-	const isValid = await verifyDownloadToken(token, kv);
+	const isValid = await verifyDownloadToken(token, kv, undefined, platform?.env);
 
 	return json({
 		success: true,

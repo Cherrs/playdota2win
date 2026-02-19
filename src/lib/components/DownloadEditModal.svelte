@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { DownloadItem, ApiResponse, Platform, Category } from '$lib/types';
+	import { trapFocus, focusFirstElement } from '$lib/utils/a11y';
 
 	interface Props {
 		item: DownloadItem;
@@ -9,6 +10,11 @@
 	}
 
 	let { item, categories, onSave, onClose }: Props = $props();
+	let dialogRef = $state<HTMLDivElement | null>(null);
+	let closeButtonRef = $state<HTMLButtonElement | null>(null);
+	let lastFocusedElement: HTMLElement | null = null;
+	const titleId = crypto.randomUUID();
+	const errorId = crypto.randomUUID();
 
 	let saving = $state(false);
 	let error = $state('');
@@ -80,24 +86,35 @@
 			saving = false;
 		}
 	}
+	$effect(() => {
+		lastFocusedElement =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		void focusFirstElement(dialogRef, closeButtonRef);
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				onClose();
+			}
+		};
+		document.addEventListener('keydown', handleKeydown);
+		return () => {
+			document.removeEventListener('keydown', handleKeydown);
+			lastFocusedElement?.focus();
+		};
+	});
 </script>
 
-<div class="modal-backdrop" role="dialog" aria-modal="true">
-	<button
-		type="button"
-		class="modal-scrim"
-		onclick={onClose}
-		onkeydown={(e) => (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && onClose()}
-		aria-label="关闭"
-	></button>
-	<div class="modal-card modal-lg">
+<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+	<button type="button" class="modal-scrim" onclick={onClose} aria-label="关闭"></button>
+	<div class="modal-card modal-lg" bind:this={dialogRef} use:trapFocus tabindex="-1">
 		<div class="modal-header">
-			<h3>编辑下载项</h3>
-			<button type="button" class="modal-close" onclick={onClose}>×</button>
+			<h3 id={titleId}>编辑下载项</h3>
+			<button type="button" class="modal-close" onclick={onClose} bind:this={closeButtonRef}>
+				×
+			</button>
 		</div>
 
 		{#if error}
-			<p class="auth-error">{error}</p>
+			<p class="auth-error" id={errorId} role="alert" aria-live="assertive">{error}</p>
 		{/if}
 
 		<div class="auth-form modal-form-grid">
@@ -377,6 +394,24 @@
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.modal-close,
+		.btn {
+			transition: none;
+		}
+
+		.modal-close:hover,
+		.btn-primary:hover:not(:disabled),
+		.btn-secondary:hover {
+			transform: none;
+			box-shadow: none;
+		}
+
+		.spinner {
+			animation: none;
 		}
 	}
 </style>

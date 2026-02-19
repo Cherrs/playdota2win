@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { verifyDownloadToken } from '$lib/auth';
+import { buildContentDisposition } from '$lib/utils/filename';
 
 // GET: R2 中转下载
 export const GET: RequestHandler = async ({ params, platform, request }) => {
@@ -21,7 +22,7 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 			return new Response('Invalid key', { status: 400 });
 		}
 
-		const authed = await verifyDownloadToken(token, kv, key);
+		const authed = await verifyDownloadToken(token, kv, key, platform?.env);
 		if (!authed) {
 			return new Response('Unauthorized', { status: 401 });
 		}
@@ -36,7 +37,7 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 		headers.set('etag', object.httpEtag);
 
 		const filename = key.split('/').pop() || 'download';
-		headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+		headers.set('Content-Disposition', buildContentDisposition(filename));
 
 		return new Response(object.body, { headers });
 	} catch (error) {

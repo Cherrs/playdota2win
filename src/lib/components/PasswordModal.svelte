@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { DownloadItem, Platform } from '$lib/types';
+	import { trapFocus, focusFirstElement } from '$lib/utils/a11y';
 	import {
 		loadTurnstileScript,
 		renderTurnstile,
@@ -22,6 +23,11 @@
 	let turnstileToken = $state('');
 	let turnstileWidgetId = $state<string | null>(null);
 	let turnstileLoaded = $state(false);
+	let dialogRef = $state<HTMLDivElement | null>(null);
+	let closeButtonRef = $state<HTMLButtonElement | null>(null);
+	let lastFocusedElement: HTMLElement | null = null;
+	const titleId = crypto.randomUUID();
+	const errorId = crypto.randomUUID();
 
 	function getPlatformLabel(platform: Platform): string {
 		switch (platform) {
@@ -94,29 +100,35 @@
 		}
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onClose();
-		}
-	}
-
 	$effect(() => {
 		initTurnstile();
 	});
+
+	$effect(() => {
+		lastFocusedElement =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		void focusFirstElement(dialogRef, closeButtonRef);
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				onClose();
+			}
+		};
+		document.addEventListener('keydown', handleKeydown);
+		return () => {
+			document.removeEventListener('keydown', handleKeydown);
+			lastFocusedElement?.focus();
+		};
+	});
 </script>
 
-<div class="modal-backdrop" role="dialog" aria-modal="true">
-	<button
-		type="button"
-		class="modal-scrim"
-		onclick={onClose}
-		onkeydown={handleKeydown}
-		aria-label="关闭"
-	></button>
-	<div class="modal-card">
+<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+	<button type="button" class="modal-scrim" onclick={onClose} aria-label="关闭"></button>
+	<div class="modal-card" bind:this={dialogRef} use:trapFocus tabindex="-1">
 		<div class="modal-header">
-			<h3>🔐 输入下载密码</h3>
-			<button class="modal-close" onclick={onClose} type="button">×</button>
+			<h3 id={titleId}>🔐 输入下载密码</h3>
+			<button class="modal-close" onclick={onClose} type="button" bind:this={closeButtonRef}>
+				×
+			</button>
 		</div>
 		<p class="modal-subtitle">
 			{item.title || `${getPlatformLabel(item.platform)} 版本`}
@@ -143,7 +155,9 @@
 			{/if}
 
 			{#if error}
-				<p class="auth-error">{error}</p>
+				<p class="auth-error" id={errorId} role="alert" aria-live="assertive">
+					{error}
+				</p>
 			{/if}
 		</div>
 		<button
@@ -339,6 +353,23 @@
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.modal-close,
+		.modal-btn {
+			transition: none;
+		}
+
+		.modal-close:hover,
+		.modal-btn:hover {
+			transform: none;
+			box-shadow: none;
+		}
+
+		.spinner {
+			animation: none;
 		}
 	}
 </style>

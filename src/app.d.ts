@@ -13,6 +13,7 @@ declare global {
 				TURNSTILE_SECRET_KEY: string;
 				TURNSTILE_SITE_KEY: string;
 				DOWNLOAD_PASSWORD: string;
+				DEV_MODE?: string;
 			};
 			cf: CfProperties;
 			ctx: ExecutionContext;

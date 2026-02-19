@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { verifySignedUrl } from '$lib/admin-auth';
+import { buildContentDisposition } from '$lib/utils/filename';
 
 // 提供 R2 存储的文件下载
 export const GET: RequestHandler = async ({ params, platform, request }) => {
@@ -9,8 +10,10 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 			return new Response('R2 not available', { status: 500 });
 		}
 
-		const signingSecret =
-			platform?.env.ADMIN_SIGNING_SECRET || platform?.env.ADMIN_PASSWORD || 'dev-secret';
+		const signingSecret = platform?.env.ADMIN_SIGNING_SECRET;
+		if (!signingSecret) {
+			return new Response('Signing secret not configured', { status: 500 });
+		}
 		const url = new URL(request.url);
 		const authed = await verifySignedUrl(url, signingSecret);
 		if (!authed) {
@@ -37,7 +40,7 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 
 		// 设置下载文件名
 		const filename = key.split('/').pop() || 'download';
-		headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+		headers.set('Content-Disposition', buildContentDisposition(filename));
 
 		return new Response(object.body, { headers });
 	} catch (error) {

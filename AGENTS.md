@@ -158,8 +158,10 @@ Cursor/Copilot rules
 - Copilot rules: see `.github/copilot-instructions.md` for Svelte 5 and UI guidance.
 
 ## Active Technologies
+
 - TypeScript 5.9 (strict mode) with Svelte 5.45 + SvelteKit 2.49, @sveltejs/adapter-cloudflare 7.2, Wrangler 4.59 (001-per-item-download-stats)
 - Cloudflare KV (APP_KV binding) for download metadata; R2 (UPLOADS_BUCKET) for file storage (001-per-item-download-stats)
 
 ## Recent Changes
+
 - 001-per-item-download-stats: Added TypeScript 5.9 (strict mode) with Svelte 5.45 + SvelteKit 2.49, @sveltejs/adapter-cloudflare 7.2, Wrangler 4.59

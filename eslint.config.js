@@ -37,5 +37,21 @@ export default defineConfig(
 				svelteConfig
 			}
 		}
+	},
+	{
+		files: ['src/worker-configuration.d.ts'],
+		rules: {
+			'@typescript-eslint/no-empty-object-type': 'warn',
+			'@typescript-eslint/no-explicit-any': 'warn',
+			'@typescript-eslint/no-unsafe-function-type': 'warn',
+			'@typescript-eslint/no-unused-vars': 'warn',
+			'no-var': 'warn'
+		}
+	},
+	{
+		files: ['src/lib/components/GuideModal.svelte'],
+		rules: {
+			'svelte/no-at-html-tags': 'warn'
+		}
 	}
 );

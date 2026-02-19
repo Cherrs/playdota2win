@@ -10,8 +10,13 @@ export function verifyDownloadPassword(
 	password: string,
 	env: App.Platform['env'] | undefined
 ): boolean {
-	const downloadPassword = env?.DOWNLOAD_PASSWORD || 'download123';
+	const downloadPassword = env?.DOWNLOAD_PASSWORD;
+	if (!downloadPassword) return false;
 	return password === downloadPassword;
+}
+
+function isDevMode(env: App.Platform['env'] | undefined): boolean {
+	return env?.DEV_MODE === 'true';
 }
 
 /**
@@ -27,12 +32,13 @@ export function generateDownloadToken(): string {
 export async function verifyDownloadToken(
 	token: string | null,
 	kv: KVNamespace | undefined,
-	path?: string
+	path?: string,
+	env?: App.Platform['env']
 ): Promise<boolean> {
 	if (!token) return false;
 
 	// 开发环境，如果没有 KV，允许任何 token
-	if (!kv) return true;
+	if (!kv) return isDevMode(env);
 
 	try {
 		const stored = await kv.get<{ token: string; expiry: number; path?: string }>(
@@ -74,12 +80,13 @@ export async function saveDownloadToken(
 
 export async function verifyToken(
 	token: string | null,
-	kv: KVNamespace | undefined
+	kv: KVNamespace | undefined,
+	env?: App.Platform['env']
 ): Promise<boolean> {
 	if (!token) return false;
 
 	// 开发环境，如果没有 KV，允许任何 token
-	if (!kv) return true;
+	if (!kv) return isDevMode(env);
 
 	try {
 		const stored = await kv.get<{ token: string; expiry: number }>(ADMIN_TOKEN_KEY, 'json');

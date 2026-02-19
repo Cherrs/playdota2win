@@ -67,7 +67,15 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			}
 		}
 
-		const adminPassword = platform?.env.ADMIN_PASSWORD || 'admin123';
+		const adminPassword = platform?.env.ADMIN_PASSWORD;
+		if (!adminPassword) {
+			return json(
+				{ success: false, error: 'Admin password not configured' } satisfies ApiResponse,
+				{
+					status: 500
+				}
+			);
+		}
 
 		if (password !== adminPassword) {
 			const newFailureCount = await counter.increment(ip);

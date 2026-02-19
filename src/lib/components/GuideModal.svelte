@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DownloadItem, Platform } from '$lib/types';
 	import { parseMarkdown } from '$lib/utils/markdown';
+	import { trapFocus, focusFirstElement } from '$lib/utils/a11y';
 
 	interface Props {
 		item: DownloadItem;
@@ -8,6 +9,11 @@
 	}
 
 	let { item, onClose }: Props = $props();
+	let parsedGuide = $derived(item.configGuide ? parseMarkdown(item.configGuide) : '');
+	let dialogRef = $state<HTMLDivElement | null>(null);
+	let closeButtonRef = $state<HTMLButtonElement | null>(null);
+	let lastFocusedElement: HTMLElement | null = null;
+	const titleId = crypto.randomUUID();
 
 	function getPlatformLabel(platform: Platform): string {
 		switch (platform) {
@@ -22,25 +28,31 @@
 		}
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onClose();
-		}
-	}
+	$effect(() => {
+		lastFocusedElement =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		void focusFirstElement(dialogRef, closeButtonRef);
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				onClose();
+			}
+		};
+		document.addEventListener('keydown', handleKeydown);
+		return () => {
+			document.removeEventListener('keydown', handleKeydown);
+			lastFocusedElement?.focus();
+		};
+	});
 </script>
 
-<div class="modal-backdrop" role="dialog" aria-modal="true">
-	<button
-		type="button"
-		class="modal-scrim"
-		onclick={onClose}
-		onkeydown={handleKeydown}
-		aria-label="关闭"
-	></button>
-	<div class="modal-card modal-lg">
+<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+	<button type="button" class="modal-scrim" onclick={onClose} aria-label="关闭"></button>
+	<div class="modal-card modal-lg" bind:this={dialogRef} use:trapFocus tabindex="-1">
 		<div class="modal-header">
-			<h3>📖 配置指引</h3>
-			<button class="modal-close" onclick={onClose} type="button">×</button>
+			<h3 id={titleId}>📖 配置指引</h3>
+			<button class="modal-close" onclick={onClose} type="button" bind:this={closeButtonRef}>
+				×
+			</button>
 		</div>
 		<p class="modal-subtitle">
 			{item.title || `${getPlatformLabel(item.platform)} 版本`}
@@ -48,8 +60,7 @@
 		<div class="guide-content-scroll">
 			{#if item.configGuide}
 				<div class="markdown-body">
-					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-					{@html parseMarkdown(item.configGuide)}
+					{@html parsedGuide}
 				</div>
 			{:else}
 				<div class="guide-empty">
@@ -252,5 +263,18 @@
 	.modal-btn:hover {
 		transform: translateY(-2px);
 		box-shadow: 0 10px 25px rgba(102, 126, 234, 0.35);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.modal-close,
+		.modal-btn {
+			transition: none;
+		}
+
+		.modal-close:hover,
+		.modal-btn:hover {
+			transform: none;
+			box-shadow: none;
+		}
 	}
 </style>
