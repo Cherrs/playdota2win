@@ -130,3 +130,34 @@ export interface CategoryFormData {
 	description?: string;
 	order?: number;
 }
+
+/**
+ * 公告
+ */
+export interface Announcement {
+	id: string;
+	title: string;
+	content: string;      // Markdown 正文
+	visible: boolean;     // false 则对用户隐藏
+	pinned: boolean;      // 置顶（排在前面）
+	createdAt: number;    // Date.now()
+	updatedAt: number;
+}
+
+/**
+ * 公告列表
+ */
+export interface AnnouncementList {
+	items: Announcement[];
+	lastUpdated: number;
+}
+
+/**
+ * 公告表单数据
+ */
+export interface AnnouncementFormData {
+	title: string;
+	content: string;
+	visible?: boolean;
+	pinned?: boolean;
+}
