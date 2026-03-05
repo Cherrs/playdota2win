@@ -45,6 +45,8 @@
 
 <style>
 	.announcement-section {
+		width: 100%;
+		max-width: 720px;
 		margin-bottom: 2rem;
 	}
 
