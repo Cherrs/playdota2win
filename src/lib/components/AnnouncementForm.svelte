@@ -85,6 +85,7 @@
 			const data: ApiResponse<Announcement> = await res.json();
 			if (data.success) {
 				success = editingId ? '更新成功' : '创建成功';
+				setTimeout(() => { success = ''; }, 3000);
 				cancelEdit();
 				await loadAnnouncements();
 			} else {
@@ -107,6 +108,7 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data: ApiResponse = await res.json();
 			if (data.success) {
+				error = '';
 				await loadAnnouncements();
 			}
 		} catch {
@@ -124,6 +126,7 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data: ApiResponse = await res.json();
 			if (data.success) {
+				error = '';
 				await loadAnnouncements();
 			}
 		} catch {
@@ -143,6 +146,7 @@
 			const data: ApiResponse = await res.json();
 			if (data.success) {
 				success = '删除成功';
+				setTimeout(() => { success = ''; }, 3000);
 				await loadAnnouncements();
 			} else {
 				error = data.error || '删除失败';
