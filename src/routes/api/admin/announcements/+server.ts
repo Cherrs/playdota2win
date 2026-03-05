@@ -96,6 +96,12 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 		if (!body.id) {
 			return json({ success: false, error: '缺少公告 ID' } satisfies ApiResponse, { status: 400 });
 		}
+		if (body.title !== undefined && !body.title.trim()) {
+			return json({ success: false, error: '公告标题不能为空' } satisfies ApiResponse, { status: 400 });
+		}
+		if (body.content !== undefined && !body.content.trim()) {
+			return json({ success: false, error: '公告内容不能为空' } satisfies ApiResponse, { status: 400 });
+		}
 
 		const stored = await kv.get<AnnouncementList>(KV_KEY, 'json');
 		const items = stored?.items || [];
