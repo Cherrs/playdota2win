@@ -15,6 +15,7 @@
 	import GuideModal from '$lib/components/GuideModal.svelte';
 	import GuidePanel from '$lib/components/GuidePanel.svelte';
 	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
+	import AnnouncementList from '$lib/components/AnnouncementList.svelte';
 
 	// 数据状态
 	let downloadCount = $state(0);
@@ -282,6 +283,9 @@
 
 		<!-- 分类选项卡 -->
 		<CategoryTabs {categories} {downloads} {selectedCategoryId} onSelect={selectCategory} />
+
+		<!-- 公告列表 -->
+		<AnnouncementList />
 
 		<!-- 下载按钮区 -->
 		<div class="download-section">
