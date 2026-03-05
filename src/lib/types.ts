@@ -168,6 +168,14 @@ export interface AnnouncementFormData {
 }
 
 /**
+ * 聊天昵称关键字列表
+ */
+export interface NicknameKeywordList {
+	keywords: string[];
+	lastUpdated: number;
+}
+
+/**
  * 聊天消息
  */
 export interface ChatMessage {
