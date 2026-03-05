@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { DownloadItem, Platform, StorageType, Category } from '$lib/types';
 

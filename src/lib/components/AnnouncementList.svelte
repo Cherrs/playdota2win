@@ -1,5 +1,9 @@
 <script lang="ts">
-	import type { Announcement, AnnouncementList as AnnouncementListData, ApiResponse } from '$lib/types';
+	import type {
+		Announcement,
+		AnnouncementList as AnnouncementListData,
+		ApiResponse
+	} from '$lib/types';
 	import AnnouncementCard from './AnnouncementCard.svelte';
 
 	let announcements = $state<Announcement[]>([]);

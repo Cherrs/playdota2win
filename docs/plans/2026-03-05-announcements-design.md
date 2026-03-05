@@ -22,18 +22,18 @@ KV Key：`announcements`，存储 `AnnouncementList`。
 
 ```ts
 interface Announcement {
-  id: string;        // nanoid 生成
-  title: string;     // 公告标题
-  content: string;   // Markdown 正文
-  visible: boolean;  // 是否显示（false 则对用户隐藏）
-  pinned: boolean;   // 是否置顶
-  createdAt: string; // ISO 时间戳
-  updatedAt: string;
+	id: string; // nanoid 生成
+	title: string; // 公告标题
+	content: string; // Markdown 正文
+	visible: boolean; // 是否显示（false 则对用户隐藏）
+	pinned: boolean; // 是否置顶
+	createdAt: string; // ISO 时间戳
+	updatedAt: string;
 }
 
 interface AnnouncementList {
-  items: Announcement[];
-  lastUpdated: string;
+	items: Announcement[];
+	lastUpdated: string;
 }
 ```
 
@@ -43,18 +43,18 @@ interface AnnouncementList {
 
 ### 公开接口（无需认证）
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/announcements` | 返回 `visible: true` 的公告列表（已排序） |
+| 方法 | 路径                 | 说明                                      |
+| ---- | -------------------- | ----------------------------------------- |
+| GET  | `/api/announcements` | 返回 `visible: true` 的公告列表（已排序） |
 
 ### 管理接口（需 Admin JWT）
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/admin/announcements` | 获取全部公告（含隐藏） |
-| POST | `/api/admin/announcements` | 创建公告 |
-| PUT | `/api/admin/announcements` | 更新公告（body 含 id） |
-| DELETE | `/api/admin/announcements?id=xxx` | 删除公告 |
+| 方法   | 路径                              | 说明                   |
+| ------ | --------------------------------- | ---------------------- |
+| GET    | `/api/admin/announcements`        | 获取全部公告（含隐藏） |
+| POST   | `/api/admin/announcements`        | 创建公告               |
+| PUT    | `/api/admin/announcements`        | 更新公告（body 含 id） |
+| DELETE | `/api/admin/announcements?id=xxx` | 删除公告               |
 
 复用现有 `requireAdminAuth()` 鉴权，结构与 `/api/admin/categories` 一致。
 

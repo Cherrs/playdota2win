@@ -12,7 +12,11 @@ function sortAnnouncements(items: Announcement[]): Announcement[] {
 }
 
 export const GET: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -20,21 +24,33 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: true, data: { items: [], lastUpdated: Date.now() } } satisfies ApiResponse<AnnouncementList>);
+			return json({
+				success: true,
+				data: { items: [], lastUpdated: Date.now() }
+			} satisfies ApiResponse<AnnouncementList>);
 		}
 
 		const stored = await kv.get<AnnouncementList>(KV_KEY, 'json');
 		const items = sortAnnouncements(stored?.items || []);
 
-		return json({ success: true, data: { items, lastUpdated: stored?.lastUpdated ?? Date.now() } } satisfies ApiResponse<AnnouncementList>);
+		return json({
+			success: true,
+			data: { items, lastUpdated: stored?.lastUpdated ?? Date.now() }
+		} satisfies ApiResponse<AnnouncementList>);
 	} catch (e) {
 		console.error('Failed to get announcements:', e);
-		return json({ success: false, error: '获取公告列表失败' } satisfies ApiResponse, { status: 500 });
+		return json({ success: false, error: '获取公告列表失败' } satisfies ApiResponse, {
+			status: 500
+		});
 	}
 };
 
 export const POST: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -42,15 +58,21 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const body = (await request.json()) as AnnouncementFormData;
 		if (!body.title?.trim()) {
-			return json({ success: false, error: '公告标题不能为空' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: '公告标题不能为空' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
 		if (!body.content?.trim()) {
-			return json({ success: false, error: '公告内容不能为空' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: '公告内容不能为空' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
 
 		const stored = await kv.get<AnnouncementList>(KV_KEY, 'json');
@@ -81,7 +103,11 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 };
 
 export const PUT: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -89,7 +115,9 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const body = (await request.json()) as { id: string } & Partial<AnnouncementFormData>;
@@ -97,10 +125,14 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 			return json({ success: false, error: '缺少公告 ID' } satisfies ApiResponse, { status: 400 });
 		}
 		if (body.title !== undefined && !body.title.trim()) {
-			return json({ success: false, error: '公告标题不能为空' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: '公告标题不能为空' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
 		if (body.content !== undefined && !body.content.trim()) {
-			return json({ success: false, error: '公告内容不能为空' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: '公告内容不能为空' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
 
 		const stored = await kv.get<AnnouncementList>(KV_KEY, 'json');
@@ -131,7 +163,11 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 };
 
 export const DELETE: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -139,7 +175,9 @@ export const DELETE: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const body = (await request.json()) as { id: string };

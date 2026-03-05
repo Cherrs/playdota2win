@@ -1,5 +1,10 @@
 <script lang="ts">
-	import type { Announcement, AnnouncementList, AnnouncementFormData, ApiResponse } from '$lib/types';
+	import type {
+		Announcement,
+		AnnouncementList,
+		AnnouncementFormData,
+		ApiResponse
+	} from '$lib/types';
 
 	interface Props {
 		token: string;
@@ -28,7 +33,9 @@
 	async function loadAnnouncements() {
 		loading = true;
 		try {
-			const res = await fetch('/api/admin/announcements', { headers: { Authorization: `Bearer ${token}` } });
+			const res = await fetch('/api/admin/announcements', {
+				headers: { Authorization: `Bearer ${token}` }
+			});
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data: ApiResponse<AnnouncementList> = await res.json();
 			if (data.success && data.data) {
@@ -85,7 +92,9 @@
 			const data: ApiResponse<Announcement> = await res.json();
 			if (data.success) {
 				success = editingId ? '更新成功' : '创建成功';
-				setTimeout(() => { success = ''; }, 3000);
+				setTimeout(() => {
+					success = '';
+				}, 3000);
 				cancelEdit();
 				await loadAnnouncements();
 			} else {
@@ -146,7 +155,9 @@
 			const data: ApiResponse = await res.json();
 			if (data.success) {
 				success = '删除成功';
-				setTimeout(() => { success = ''; }, 3000);
+				setTimeout(() => {
+					success = '';
+				}, 3000);
 				await loadAnnouncements();
 			} else {
 				error = data.error || '删除失败';
@@ -176,11 +187,23 @@
 		<h4 class="form-title">{editingId ? '编辑公告' : '新增公告'}</h4>
 		<div class="form-field">
 			<label for="ann-title">标题</label>
-			<input id="ann-title" type="text" bind:value={formTitle} placeholder="公告标题" class="form-input" />
+			<input
+				id="ann-title"
+				type="text"
+				bind:value={formTitle}
+				placeholder="公告标题"
+				class="form-input"
+			/>
 		</div>
 		<div class="form-field">
 			<label for="ann-content">内容（Markdown）</label>
-			<textarea id="ann-content" bind:value={formContent} placeholder="支持 **加粗**、[链接](url)、- 列表等 Markdown 格式" class="form-textarea" rows="5"></textarea>
+			<textarea
+				id="ann-content"
+				bind:value={formContent}
+				placeholder="支持 **加粗**、[链接](url)、- 列表等 Markdown 格式"
+				class="form-textarea"
+				rows="5"
+			></textarea>
 		</div>
 		<div class="form-row">
 			<label class="checkbox-label">
@@ -213,7 +236,9 @@
 				<div class="list-item">
 					<div class="item-info">
 						<span class="item-title">{item.pinned ? '📌 ' : ''}{item.title}</span>
-						<span class="item-status" class:hidden={!item.visible}>{item.visible ? '显示' : '隐藏'}</span>
+						<span class="item-status" class:hidden={!item.visible}
+							>{item.visible ? '显示' : '隐藏'}</span
+						>
 					</div>
 					<div class="item-actions">
 						<button class="btn-sm" onclick={() => togglePinned(item)} type="button">
@@ -223,7 +248,11 @@
 							{item.visible ? '隐藏' : '显示'}
 						</button>
 						<button class="btn-sm" onclick={() => startEdit(item)} type="button">编辑</button>
-						<button class="btn-sm btn-danger" onclick={() => deleteAnnouncement(item.id)} type="button">删除</button>
+						<button
+							class="btn-sm btn-danger"
+							onclick={() => deleteAnnouncement(item.id)}
+							type="button">删除</button
+						>
 					</div>
 				</div>
 			{/each}

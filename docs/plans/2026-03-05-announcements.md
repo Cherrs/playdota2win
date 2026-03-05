@@ -13,6 +13,7 @@
 ### Task 1: 添加 TypeScript 类型
 
 **Files:**
+
 - Modify: `src/lib/types.ts`
 
 **Step 1: 在 `src/lib/types.ts` 末尾追加以下类型**
@@ -24,10 +25,10 @@
 export interface Announcement {
 	id: string;
 	title: string;
-	content: string;      // Markdown 正文
-	visible: boolean;     // false 则对用户隐藏
-	pinned: boolean;      // 置顶（排在前面）
-	createdAt: number;    // Date.now()
+	content: string; // Markdown 正文
+	visible: boolean; // false 则对用户隐藏
+	pinned: boolean; // 置顶（排在前面）
+	createdAt: number; // Date.now()
 	updatedAt: number;
 }
 
@@ -70,6 +71,7 @@ git commit -m "feat: 添加公告系统 TypeScript 类型"
 ### Task 2: 创建公开 GET API
 
 **Files:**
+
 - Create: `src/routes/api/announcements/+server.ts`
 
 **Step 1: 创建文件**
@@ -146,6 +148,7 @@ git commit -m "feat: 添加公告公开 GET API"
 ### Task 3: 创建管理员 CRUD API
 
 **Files:**
+
 - Create: `src/routes/api/admin/announcements/+server.ts`
 
 **Step 1: 创建文件**
@@ -165,7 +168,11 @@ function sortAnnouncements(items: Announcement[]): Announcement[] {
 }
 
 export const GET: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -173,21 +180,33 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: true, data: { items: [], lastUpdated: Date.now() } } satisfies ApiResponse<AnnouncementList>);
+			return json({
+				success: true,
+				data: { items: [], lastUpdated: Date.now() }
+			} satisfies ApiResponse<AnnouncementList>);
 		}
 
 		const stored = await kv.get<AnnouncementList>(KV_KEY, 'json');
 		const items = sortAnnouncements(stored?.items || []);
 
-		return json({ success: true, data: { items, lastUpdated: stored?.lastUpdated ?? Date.now() } } satisfies ApiResponse<AnnouncementList>);
+		return json({
+			success: true,
+			data: { items, lastUpdated: stored?.lastUpdated ?? Date.now() }
+		} satisfies ApiResponse<AnnouncementList>);
 	} catch (e) {
 		console.error('Failed to get announcements:', e);
-		return json({ success: false, error: '获取公告列表失败' } satisfies ApiResponse, { status: 500 });
+		return json({ success: false, error: '获取公告列表失败' } satisfies ApiResponse, {
+			status: 500
+		});
 	}
 };
 
 export const POST: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -195,15 +214,21 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const body = (await request.json()) as AnnouncementFormData;
 		if (!body.title?.trim()) {
-			return json({ success: false, error: '公告标题不能为空' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: '公告标题不能为空' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
 		if (!body.content?.trim()) {
-			return json({ success: false, error: '公告内容不能为空' } satisfies ApiResponse, { status: 400 });
+			return json({ success: false, error: '公告内容不能为空' } satisfies ApiResponse, {
+				status: 400
+			});
 		}
 
 		const stored = await kv.get<AnnouncementList>(KV_KEY, 'json');
@@ -234,7 +259,11 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 };
 
 export const PUT: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -242,7 +271,9 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const body = (await request.json()) as { id: string } & Partial<AnnouncementFormData>;
@@ -278,7 +309,11 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 };
 
 export const DELETE: RequestHandler = async ({ request, platform }) => {
-	const isAuthed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET, platform?.env.APP_KV);
+	const isAuthed = await requireAdminAuth(
+		request,
+		platform?.env.ADMIN_JWT_SECRET,
+		platform?.env.APP_KV
+	);
 	if (!isAuthed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}
@@ -286,7 +321,9 @@ export const DELETE: RequestHandler = async ({ request, platform }) => {
 	try {
 		const kv = platform?.env.APP_KV;
 		if (!kv) {
-			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, { status: 500 });
+			return json({ success: false, error: 'KV 存储不可用' } satisfies ApiResponse, {
+				status: 500
+			});
 		}
 
 		const body = (await request.json()) as { id: string };
@@ -333,6 +370,7 @@ git commit -m "feat: 添加公告管理员 CRUD API"
 ### Task 4: 创建 AnnouncementCard 组件
 
 **Files:**
+
 - Create: `src/lib/components/AnnouncementCard.svelte`
 
 项目已有 `src/lib/utils/markdown.ts`，使用其中的解析函数渲染 Markdown。先读取该文件确认导出的函数名。
@@ -456,13 +494,18 @@ git commit -m "feat: 添加 AnnouncementCard 组件"
 ### Task 5: 创建 AnnouncementList 组件
 
 **Files:**
+
 - Create: `src/lib/components/AnnouncementList.svelte`
 
 **Step 1: 创建文件**
 
 ```svelte
 <script lang="ts">
-	import type { Announcement, AnnouncementList as AnnouncementListData, ApiResponse } from '$lib/types';
+	import type {
+		Announcement,
+		AnnouncementList as AnnouncementListData,
+		ApiResponse
+	} from '$lib/types';
 	import AnnouncementCard from './AnnouncementCard.svelte';
 
 	let announcements = $state<Announcement[]>([]);
@@ -553,6 +596,7 @@ git commit -m "feat: 添加 AnnouncementList 组件"
 ### Task 6: 将 AnnouncementList 嵌入下载页
 
 **Files:**
+
 - Modify: `src/routes/download/+page.svelte`
 
 **Step 1: 在 script 导入区追加 AnnouncementList 导入**
@@ -601,6 +645,7 @@ git commit -m "feat: 在下载页嵌入公告列表"
 ### Task 7: 创建 AnnouncementForm 管理组件
 
 **Files:**
+
 - Create: `src/lib/components/AnnouncementForm.svelte`
 
 该组件供管理后台使用，接受 token prop，支持新增、编辑、删除、切换 visible/pinned。
@@ -609,7 +654,12 @@ git commit -m "feat: 在下载页嵌入公告列表"
 
 ```svelte
 <script lang="ts">
-	import type { Announcement, AnnouncementList, AnnouncementFormData, ApiResponse } from '$lib/types';
+	import type {
+		Announcement,
+		AnnouncementList,
+		AnnouncementFormData,
+		ApiResponse
+	} from '$lib/types';
 
 	interface Props {
 		token: string;
@@ -638,7 +688,9 @@ git commit -m "feat: 在下载页嵌入公告列表"
 	async function loadAnnouncements() {
 		loading = true;
 		try {
-			const res = await fetch('/api/admin/announcements', { headers: { Authorization: `Bearer ${token}` } });
+			const res = await fetch('/api/admin/announcements', {
+				headers: { Authorization: `Bearer ${token}` }
+			});
 			const data: ApiResponse<AnnouncementList> = await res.json();
 			if (data.success && data.data) {
 				announcements = data.data.items;
@@ -777,11 +829,23 @@ git commit -m "feat: 在下载页嵌入公告列表"
 		<h4 class="form-title">{editingId ? '编辑公告' : '新增公告'}</h4>
 		<div class="form-field">
 			<label for="ann-title">标题</label>
-			<input id="ann-title" type="text" bind:value={formTitle} placeholder="公告标题" class="form-input" />
+			<input
+				id="ann-title"
+				type="text"
+				bind:value={formTitle}
+				placeholder="公告标题"
+				class="form-input"
+			/>
 		</div>
 		<div class="form-field">
 			<label for="ann-content">内容（Markdown）</label>
-			<textarea id="ann-content" bind:value={formContent} placeholder="支持 **加粗**、[链接](url)、- 列表等 Markdown 格式" class="form-textarea" rows="5"></textarea>
+			<textarea
+				id="ann-content"
+				bind:value={formContent}
+				placeholder="支持 **加粗**、[链接](url)、- 列表等 Markdown 格式"
+				class="form-textarea"
+				rows="5"
+			></textarea>
 		</div>
 		<div class="form-row">
 			<label class="checkbox-label">
@@ -814,7 +878,9 @@ git commit -m "feat: 在下载页嵌入公告列表"
 				<div class="list-item">
 					<div class="item-info">
 						<span class="item-title">{item.pinned ? '📌 ' : ''}{item.title}</span>
-						<span class="item-status" class:hidden={!item.visible}>{item.visible ? '显示' : '隐藏'}</span>
+						<span class="item-status" class:hidden={!item.visible}
+							>{item.visible ? '显示' : '隐藏'}</span
+						>
 					</div>
 					<div class="item-actions">
 						<button class="btn-sm" onclick={() => togglePinned(item)} type="button">
@@ -824,7 +890,11 @@ git commit -m "feat: 在下载页嵌入公告列表"
 							{item.visible ? '隐藏' : '显示'}
 						</button>
 						<button class="btn-sm" onclick={() => startEdit(item)} type="button">编辑</button>
-						<button class="btn-sm btn-danger" onclick={() => deleteAnnouncement(item.id)} type="button">删除</button>
+						<button
+							class="btn-sm btn-danger"
+							onclick={() => deleteAnnouncement(item.id)}
+							type="button">删除</button
+						>
 					</div>
 				</div>
 			{/each}
@@ -1052,11 +1122,13 @@ git commit -m "feat: 添加 AnnouncementForm 管理组件"
 ### Task 8: 将公告管理嵌入后台管理页
 
 **Files:**
+
 - Modify: `src/routes/admin/+page.svelte`
 
 **Step 1: 读取 admin 页面完整内容**
 
 用 Read 工具读取 `src/routes/admin/+page.svelte` 全文，找到：
+
 1. script 顶部 import 区域
 2. 渲染 `CategoryManager` 的位置（这里要新增 Tab 切换）
 
@@ -1161,6 +1233,7 @@ npm run dev
 ```
 
 访问 `http://localhost:5173/admin`，登录后确认：
+
 - 顶部出现三个 Tab：下载管理 / 分类管理 / 公告管理
 - 点击「公告管理」Tab 显示公告表单和列表
 - 可创建、编辑、删除、切换显示/置顶
@@ -1199,6 +1272,7 @@ npm run dev
 ```
 
 验证清单：
+
 - [ ] `/download` 页面：公告卡片出现在下载列表上方，示例公告正确渲染 Markdown
 - [ ] `/admin` 页面：登录后「公告管理」Tab 可见
 - [ ] 新增公告：填写标题+Markdown内容，点击「发布公告」，列表刷新

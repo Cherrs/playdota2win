@@ -49,9 +49,15 @@ export default defineConfig(
 		}
 	},
 	{
-		files: ['src/lib/components/GuideModal.svelte'],
+		files: ['src/lib/components/GuideModal.svelte', 'src/lib/components/AnnouncementCard.svelte'],
 		rules: {
 			'svelte/no-at-html-tags': 'warn'
+		}
+	},
+	{
+		files: ['src/lib/components/DownloadList.svelte'],
+		rules: {
+			'svelte/no-navigation-without-resolve': 'off'
 		}
 	}
 );
