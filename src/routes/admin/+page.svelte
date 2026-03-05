@@ -16,6 +16,7 @@
 
 	// Tab 状态
 	let adminTab = $state<'downloads' | 'categories' | 'announcements'>('downloads');
+	let adminToken = $state('');
 
 	// 认证状态
 	let isAuthenticated = $state(false);
@@ -42,6 +43,7 @@
 		const token = localStorage.getItem('admin_token');
 		if (token) {
 			isAuthenticated = true;
+			adminToken = token;
 			await Promise.all([loadDownloads(), loadCategories()]);
 		} else {
 			loading = false;
@@ -51,6 +53,7 @@
 	// 处理登录成功
 	function handleLoginSuccess() {
 		isAuthenticated = true;
+		adminToken = localStorage.getItem('admin_token') ?? '';
 		loadDownloads();
 		loadCategories();
 	}
@@ -265,7 +268,7 @@
 		{/if}
 
 		{#if adminTab === 'announcements'}
-			<AnnouncementForm token={localStorage.getItem('admin_token') ?? ''} />
+			<AnnouncementForm token={adminToken} />
 		{/if}
 	</div>
 {/if}
