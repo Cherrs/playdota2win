@@ -7,6 +7,7 @@ declare global {
 				ASSETS: Fetcher;
 				APP_KV: KVNamespace;
 				UPLOADS_BUCKET: R2Bucket;
+				CHAT_ROOM: DurableObjectNamespace;
 				ADMIN_PASSWORD: string;
 				ADMIN_SIGNING_SECRET: string;
 				ADMIN_JWT_SECRET: string;

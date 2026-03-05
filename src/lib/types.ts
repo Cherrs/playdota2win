@@ -166,3 +166,30 @@ export interface AnnouncementFormData {
 	visible?: boolean;
 	pinned?: boolean;
 }
+
+/**
+ * 聊天消息
+ */
+export interface ChatMessage {
+	id: string;
+	nickname: string;
+	text: string;
+	timestamp: number;
+}
+
+/**
+ * 客户端 -> 服务端 聊天事件
+ */
+export type ChatClientEvent =
+	| { type: 'join'; nickname: string }
+	| { type: 'rename'; nickname: string }
+	| { type: 'message'; text: string };
+
+/**
+ * 服务端 -> 客户端 聊天事件
+ */
+export type ChatServerEvent =
+	| { type: 'history'; messages: ChatMessage[] }
+	| { type: 'message'; message: ChatMessage }
+	| { type: 'presence'; online: number }
+	| { type: 'error'; message: string };

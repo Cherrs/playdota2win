@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build",
+		"build": "vite build && node scripts/patch-worker-chat-do.js",
 		"preview": "npm run build && wrangler dev",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
@@ -13,7 +13,9 @@
 		"lint": "eslint . && prettier --check .",
 		"format": "prettier --write .",
 		"deploy": "npm run build && wrangler deploy",
-		"cf-typegen": "wrangler types ./src/worker-configuration.d.ts"
+		"cf-typegen": "wrangler types ./src/worker-configuration.d.ts",
+		"seed": "node scripts/seed.js",
+		"seed:remote": "node scripts/seed.js --remote"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.4.0",
