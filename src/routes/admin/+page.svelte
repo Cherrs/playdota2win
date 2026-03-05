@@ -12,6 +12,10 @@
 	import DownloadForm from '$lib/components/DownloadForm.svelte';
 	import DownloadListComponent from '$lib/components/DownloadList.svelte';
 	import DownloadEditModal from '$lib/components/DownloadEditModal.svelte';
+	import AnnouncementForm from '$lib/components/AnnouncementForm.svelte';
+
+	// Tab 状态
+	let adminTab = $state<'downloads' | 'categories' | 'announcements'>('downloads');
 
 	// 认证状态
 	let isAuthenticated = $state(false);
@@ -201,32 +205,67 @@
 			</div>
 		{/if}
 
-		<CategoryManager
-			bind:categories
-			{downloads}
-			onCategoriesChange={handleCategoriesChange}
-			onReloadDownloads={loadDownloads}
-		/>
+		<div class="admin-tabs">
+			<button
+				class="tab-btn"
+				class:active={adminTab === 'downloads'}
+				onclick={() => (adminTab = 'downloads')}
+				type="button"
+			>
+				下载管理
+			</button>
+			<button
+				class="tab-btn"
+				class:active={adminTab === 'categories'}
+				onclick={() => (adminTab = 'categories')}
+				type="button"
+			>
+				分类管理
+			</button>
+			<button
+				class="tab-btn"
+				class:active={adminTab === 'announcements'}
+				onclick={() => (adminTab = 'announcements')}
+				type="button"
+			>
+				公告管理
+			</button>
+		</div>
 
-		<DownloadForm {categories} onAdd={handleAddSuccess} />
-
-		<DownloadListComponent
-			{downloads}
-			{categories}
-			{loading}
-			onEdit={(item: DownloadItem) => (editingItem = item)}
-			onToggleEnabled={handleToggleEnabled}
-			onDelete={handleDelete}
-			onReload={loadDownloads}
-		/>
-
-		{#if editingItem}
-			<DownloadEditModal
-				item={editingItem}
-				{categories}
-				onSave={handleEditSave}
-				onClose={() => (editingItem = null)}
+		{#if adminTab === 'categories'}
+			<CategoryManager
+				bind:categories
+				{downloads}
+				onCategoriesChange={handleCategoriesChange}
+				onReloadDownloads={loadDownloads}
 			/>
+		{/if}
+
+		{#if adminTab === 'downloads'}
+			<DownloadForm {categories} onAdd={handleAddSuccess} />
+
+			<DownloadListComponent
+				{downloads}
+				{categories}
+				{loading}
+				onEdit={(item: DownloadItem) => (editingItem = item)}
+				onToggleEnabled={handleToggleEnabled}
+				onDelete={handleDelete}
+				onReload={loadDownloads}
+			/>
+
+			{#if editingItem}
+				<DownloadEditModal
+					item={editingItem}
+					{categories}
+					onSave={handleEditSave}
+					onClose={() => (editingItem = null)}
+				/>
+			{/if}
+		{/if}
+
+		{#if adminTab === 'announcements'}
+			<AnnouncementForm token={localStorage.getItem('admin_token') ?? ''} />
 		{/if}
 	</div>
 {/if}
@@ -279,5 +318,32 @@
 		.admin-container {
 			padding: 1rem;
 		}
+	}
+
+	.admin-tabs {
+		display: flex;
+		gap: 0.5rem;
+		max-width: 1000px;
+		margin: 0 auto 1.5rem;
+		border-bottom: 2px solid rgba(107, 76, 154, 0.15);
+		padding-bottom: 0.5rem;
+	}
+
+	.tab-btn {
+		padding: 0.5rem 1rem;
+		border: none;
+		background: transparent;
+		border-radius: 12px 12px 0 0;
+		font-size: 0.9rem;
+		font-family: inherit;
+		color: #888;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.tab-btn.active {
+		background: rgba(107, 76, 154, 0.1);
+		color: #6b4c9a;
+		font-weight: 600;
 	}
 </style>
