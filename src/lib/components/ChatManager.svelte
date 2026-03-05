@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ChatMessage, ApiResponse } from '$lib/types';
+	import type { ChatMessage, ApiResponse, NicknameKeywordList } from '$lib/types';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
@@ -15,6 +15,14 @@
 	let selectedIds = new SvelteSet<string>();
 	let hasMore = $state(false);
 	let deleting = $state(false);
+
+	// 昵称关键字配置
+	let keywords = $state<string[]>([]);
+	let newKeyword = $state('');
+	let keywordsLoading = $state(false);
+	let keywordsSaving = $state(false);
+	let keywordsError = $state('');
+	let keywordsSuccess = $state('');
 
 	function authHeaders() {
 		return { Authorization: `Bearer ${token}` };
@@ -101,6 +109,64 @@
 		}
 	}
 
+	async function loadKeywords() {
+		keywordsLoading = true;
+		keywordsError = '';
+		try {
+			const res = await fetch('/api/admin/chat/nicknames', { headers: authHeaders() });
+			const data: ApiResponse<NicknameKeywordList> = await res.json();
+			if (data.success && data.data) {
+				keywords = data.data.keywords;
+			} else {
+				keywordsError = data.error || '加载关键字失败';
+			}
+		} catch {
+			keywordsError = '网络错误';
+		} finally {
+			keywordsLoading = false;
+		}
+	}
+
+	async function saveKeywords() {
+		keywordsSaving = true;
+		keywordsError = '';
+		keywordsSuccess = '';
+		try {
+			const res = await fetch('/api/admin/chat/nicknames', {
+				method: 'PUT',
+				headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+				body: JSON.stringify({ keywords })
+			});
+			const data: ApiResponse<NicknameKeywordList> = await res.json();
+			if (data.success && data.data) {
+				keywords = data.data.keywords;
+				keywordsSuccess = '关键字已保存';
+			} else {
+				keywordsError = data.error || '保存失败';
+			}
+		} catch {
+			keywordsError = '网络错误';
+		} finally {
+			keywordsSaving = false;
+		}
+	}
+
+	function addKeyword() {
+		const trimmed = newKeyword.trim();
+		if (!trimmed) return;
+		if (keywords.includes(trimmed)) {
+			keywordsError = '关键字已存在';
+			return;
+		}
+		keywords = [...keywords, trimmed];
+		newKeyword = '';
+		keywordsError = '';
+	}
+
+	function removeKeyword(index: number) {
+		keywords = keywords.filter((_, i) => i !== index);
+	}
+
 	function toggleSelect(id: string) {
 		if (selectedIds.has(id)) {
 			selectedIds.delete(id);
@@ -126,10 +192,72 @@
 
 	$effect(() => {
 		loadMessages();
+		loadKeywords();
 	});
 </script>
 
 <div class="chat-manager">
+	<div class="keywords-section">
+		<div class="keywords-header">
+			<h2>🏷️ 昵称关键字配置</h2>
+			<p class="keywords-hint">
+				配置后，聊天用户将获得 Dota 2 主题的随机昵称（如"超神的大飞"、"青铜小明"）
+			</p>
+		</div>
+
+		{#if keywordsError}
+			<div class="alert alert-error">
+				❌ {keywordsError}
+				<button class="alert-close" onclick={() => (keywordsError = '')}>×</button>
+			</div>
+		{/if}
+
+		{#if keywordsSuccess}
+			<div class="alert alert-success">
+				✅ {keywordsSuccess}
+				<button class="alert-close" onclick={() => (keywordsSuccess = '')}>×</button>
+			</div>
+		{/if}
+
+		{#if keywordsLoading}
+			<div class="loading">加载中...</div>
+		{:else}
+			<div class="keywords-input-row">
+				<input
+					type="text"
+					class="keyword-input"
+					placeholder="输入关键字（如：大飞）"
+					maxlength={10}
+					bind:value={newKeyword}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') addKeyword();
+					}}
+				/>
+				<button class="btn btn-add" onclick={addKeyword} disabled={!newKeyword.trim()}>
+					➕ 添加
+				</button>
+			</div>
+
+			<div class="keywords-tags">
+				{#if keywords.length === 0}
+					<span class="keywords-empty">暂未配置关键字，将使用默认"游客+随机数"昵称</span>
+				{/if}
+				{#each keywords as keyword, index (keyword)}
+					<span class="keyword-tag">
+						{keyword}
+						<button class="tag-remove" onclick={() => removeKeyword(index)} title="删除">×</button>
+					</span>
+				{/each}
+			</div>
+
+			<div class="keywords-actions">
+				<button class="btn btn-save" onclick={saveKeywords} disabled={keywordsSaving}>
+					{keywordsSaving ? '保存中...' : '💾 保存关键字'}
+				</button>
+			</div>
+		{/if}
+	</div>
+
 	<div class="manager-header">
 		<h2>💬 聊天记录管理</h2>
 		<div class="header-actions">
@@ -143,9 +271,7 @@
 			>
 				🗑️ 删除选中 ({selectedIds.size})
 			</button>
-			<button class="btn btn-danger" onclick={clearAll} disabled={deleting}>
-				⚠️ 清空所有
-			</button>
+			<button class="btn btn-danger" onclick={clearAll} disabled={deleting}> ⚠️ 清空所有 </button>
 		</div>
 	</div>
 
@@ -468,5 +594,123 @@
 		td {
 			padding: 0.5rem 0.6rem;
 		}
+	}
+
+	.keywords-section {
+		background: rgba(255, 255, 255, 0.7);
+		border-radius: 16px;
+		padding: 1.5rem;
+		margin-bottom: 2rem;
+		box-shadow: 0 4px 15px rgba(107, 76, 154, 0.1);
+		backdrop-filter: blur(10px);
+	}
+
+	.keywords-header h2 {
+		margin: 0 0 0.3rem;
+		font-family: 'Fredoka', sans-serif;
+		color: #6b4c9a;
+		font-size: 1.3rem;
+	}
+
+	.keywords-hint {
+		margin: 0 0 1rem;
+		font-size: 0.85rem;
+		color: #8b7ba8;
+	}
+
+	.keywords-input-row {
+		display: flex;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.keyword-input {
+		flex: 1;
+		max-width: 240px;
+		padding: 0.5rem 0.8rem;
+		border: 2px solid #eadbff;
+		border-radius: 12px;
+		font-size: 0.9rem;
+		outline: none;
+		font-family: inherit;
+	}
+
+	.keyword-input:focus {
+		border-color: #c8b2ff;
+	}
+
+	.btn-add {
+		background: rgba(107, 76, 154, 0.1);
+		color: #6b4c9a;
+	}
+
+	.btn-add:hover:not(:disabled) {
+		background: rgba(107, 76, 154, 0.2);
+	}
+
+	.keywords-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+		min-height: 36px;
+		align-items: center;
+	}
+
+	.keywords-empty {
+		font-size: 0.85rem;
+		color: #9787b8;
+		font-style: italic;
+	}
+
+	.keyword-tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		background: linear-gradient(
+			135deg,
+			rgba(255, 158, 196, 0.25) 0%,
+			rgba(200, 178, 255, 0.25) 100%
+		);
+		color: #6b4c9a;
+		padding: 0.35rem 0.7rem;
+		border-radius: 999px;
+		font-size: 0.88rem;
+		font-weight: 600;
+	}
+
+	.tag-remove {
+		background: none;
+		border: none;
+		color: #9787b8;
+		cursor: pointer;
+		font-size: 1.1rem;
+		padding: 0;
+		line-height: 1;
+		transition: color 0.2s;
+	}
+
+	.tag-remove:hover {
+		color: #ff6b9d;
+	}
+
+	.keywords-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.btn-save {
+		background: linear-gradient(135deg, #ff8fbe 0%, #bfa5ff 100%);
+		color: #2f1a52;
+		font-weight: 700;
+	}
+
+	.btn-save:hover:not(:disabled) {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(107, 76, 154, 0.2);
+	}
+
+	.btn-save:disabled {
+		opacity: 0.6;
 	}
 </style>
