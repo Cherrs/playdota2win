@@ -14,8 +14,8 @@
 	import PasswordModal from '$lib/components/PasswordModal.svelte';
 	import GuideModal from '$lib/components/GuideModal.svelte';
 	import GuidePanel from '$lib/components/GuidePanel.svelte';
-	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
 	import AnnouncementList from '$lib/components/AnnouncementList.svelte';
+	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
 
 	// 数据状态
 	let downloadCount = $state(0);
