@@ -1,75 +1,293 @@
-# Chat Nickname Keywords Design
+# Chat Nickname Keywords Implementation Plan
 
-## Problem
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-当前聊天昵称为 `游客` + 随机4位数字（如"游客3847"），缺乏个性和趣味性。
+**Goal:** Replace random `游客XXXX` nicknames with Dota 2 themed random nicknames based on admin-configured keywords.
 
-## Approach
+**Architecture:** Admin configures keywords (stored in KV as `chat_nickname_keywords`). Frontend hardcodes Dota 2 modifiers + templates. Client fetches keywords on mount, randomly combines modifier+keyword+template to generate nicknames. Fallback to `游客{number}` if no keywords configured.
 
-管理员在后台配置关键字（如"大飞"），前端硬编码 Dota 2 主题修饰词，客户端拉取关键字后本地随机组合生成昵称（如"超神的大飞"、"青铜大飞"）。
+**Tech Stack:** SvelteKit, Cloudflare KV, TypeScript, Svelte 5 runes
 
-## Design
+---
 
-### Data Storage
+### Task 1: Add NicknameKeywordList type
 
-**KV key: `chat_nickname_keywords`**
+**Files:**
+- Modify: `src/lib/types.ts` (append after `AnnouncementFormData`)
+
+**Step 1: Add the type**
+
+Add at end of `src/lib/types.ts` before the chat types section:
 
 ```typescript
-interface NicknameKeywordList {
-  keywords: string[];      // ["大飞", "小明", "老王"]
-  lastUpdated: number;
+/**
+ * 聊天昵称关键字列表
+ */
+export interface NicknameKeywordList {
+	keywords: string[];
+	lastUpdated: number;
 }
 ```
 
-### Dota 2 Modifiers (Hardcoded in Frontend)
+**Step 2: Verify types**
 
-```typescript
-const NICKNAME_MODIFIERS = {
-  战绩: ['超神', '暴走', '团灭', '送一血', 'MVP', '如鱼得水', '主宰比赛', '无人能挡', '大杀特杀'],
-  段位: ['青铜', '传奇', '万古流河', '冠绝一世', '不朽', '先知'],
-  位置: ['带飞', '打野', '辅助', '中单', 'Carry', '游走', '工具人'],
-  风格: ['莽夫', '快乐', '逆风翻盘', '偷塔', '挂机', '速推', '猥琐发育'],
-};
+Run: `npm run check`
+Expected: No errors
 
-const NICKNAME_TEMPLATES = [
-  '{modifier}{keyword}',
-  '{modifier}的{keyword}',
-  '{keyword}{modifier}',
-];
+**Step 3: Commit**
+
+```bash
+git add src/lib/types.ts
+git commit -m "feat: add NicknameKeywordList type"
 ```
 
-### API Endpoints
+---
 
-**Admin (requires auth):**
-- `GET /api/admin/chat/nicknames` — 获取关键字列表
-- `PUT /api/admin/chat/nicknames` — 更新关键字列表
+### Task 2: Create nickname generation module
 
-**Public:**
-- `GET /api/chat/nicknames` — 客户端获取关键字列表
+**Files:**
+- Create: `src/lib/nickname.ts`
 
-### Admin UI
+**Step 1: Create the module**
 
-在 `ChatManager.svelte` 顶部添加「昵称关键字」配置区：
-- 文本输入框 + "添加"按钮
-- 关键字以 tag 形式展示，可点击 × 删除
-- "保存"按钮提交
+```typescript
+/**
+ * Dota 2 themed nickname generation.
+ * Modifiers are hardcoded; keywords come from admin config via KV.
+ */
 
-### Frontend Nickname Generation
+export const NICKNAME_MODIFIERS: Record<string, string[]> = {
+	战绩: ['超神', '暴走', '团灭', '送一血', 'MVP', '如鱼得水', '主宰比赛', '无人能挡', '大杀特杀', 'godlike'],
+	段位: ['青铜', '传奇', '万古流河', '冠绝一世', '不朽', '先知', '卫士', '统帅'],
+	位置: ['带飞', '打野', '辅助', '中单', 'Carry', '游走', '工具人', '混子'],
+	风格: ['莽夫', '快乐', '逆风翻盘', '偷塔', '挂机', '速推', '猥琐发育', '敢死队'],
+};
 
-1. `ChatWidget.svelte` 加载时请求 `GET /api/chat/nicknames`
-2. `generateGuestNickname()` 改为从关键字+修饰词+模板随机组合
-3. 结果存入 `localStorage`，后续访问不再重新生成
-4. 昵称输入框旁增加 🎲 按钮，点击重新随机生成
+type TemplateFunction = (modifier: string, keyword: string) => string;
 
-### Fallback
+const NICKNAME_TEMPLATES: TemplateFunction[] = [
+	(m, k) => `${m}${k}`,
+	(m, k) => `${m}的${k}`,
+	(m, k) => `${k}${m}`,
+];
 
-若管理员未配置关键字或 API 失败，回退到现有的 `游客{随机4位数}` 模式。
+function randomItem<T>(arr: T[]): T {
+	return arr[Math.floor(Math.random() * arr.length)];
+}
 
-### Files to Modify
+export function generateRandomNickname(keywords: string[]): string {
+	if (keywords.length === 0) {
+		return `游客${Math.floor(Math.random() * 9000 + 1000)}`;
+	}
+	const keyword = randomItem(keywords);
+	const categoryKeys = Object.keys(NICKNAME_MODIFIERS);
+	const category = randomItem(categoryKeys);
+	const modifier = randomItem(NICKNAME_MODIFIERS[category]);
+	const template = randomItem(NICKNAME_TEMPLATES);
+	const result = template(modifier, keyword);
+	// Enforce max nickname length (24 chars from protocol)
+	return result.slice(0, 24);
+}
+```
 
-1. `src/lib/types.ts` — 新增 `NicknameKeywordList` 类型
-2. `src/lib/nickname.ts` — 新建，包含修饰词、模板和生成逻辑
-3. `src/routes/api/admin/chat/nicknames/+server.ts` — Admin CRUD API
-4. `src/routes/api/chat/nicknames/+server.ts` — Public read API
-5. `src/lib/components/ChatManager.svelte` — 添加关键字管理 UI
-6. `src/lib/components/ChatWidget.svelte` — 修改昵称生成 + 添加随机按钮
+**Step 2: Verify types**
+
+Run: `npm run check`
+Expected: No errors
+
+**Step 3: Commit**
+
+```bash
+git add src/lib/nickname.ts
+git commit -m "feat: add Dota 2 themed nickname generation module"
+```
+
+---
+
+### Task 3: Create admin API for nickname keywords
+
+**Files:**
+- Create: `src/routes/api/admin/chat/nicknames/+server.ts`
+
+**Step 1: Create the endpoint**
+
+Follow the pattern from `src/routes/api/admin/chat/+server.ts` and `src/routes/api/categories/+server.ts`.
+
+```typescript
+import { json, type RequestHandler } from '@sveltejs/kit';
+import { requireAdminAuth } from '$lib/admin-auth';
+import type { ApiResponse, NicknameKeywordList } from '$lib/types';
+
+const KV_KEY = 'chat_nickname_keywords';
+
+export const GET: RequestHandler = async ({ request, platform }) => {
+	const authed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET);
+	if (!authed) return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
+
+	const kv = platform?.env.APP_KV;
+	if (!kv) return json({ success: true, data: { keywords: [], lastUpdated: Date.now() } } satisfies ApiResponse<NicknameKeywordList>);
+
+	const stored = await kv.get<NicknameKeywordList>(KV_KEY, 'json');
+	return json({ success: true, data: stored ?? { keywords: [], lastUpdated: Date.now() } } satisfies ApiResponse<NicknameKeywordList>);
+};
+
+export const PUT: RequestHandler = async ({ request, platform }) => {
+	const authed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET);
+	if (!authed) return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
+
+	const kv = platform?.env.APP_KV;
+	if (!kv) return json({ success: false, error: 'KV 不可用' } satisfies ApiResponse, { status: 500 });
+
+	const body = await request.json() as { keywords?: string[] };
+	if (!Array.isArray(body.keywords)) {
+		return json({ success: false, error: 'keywords 必须是字符串数组' } satisfies ApiResponse, { status: 400 });
+	}
+
+	const keywords = body.keywords
+		.map((k: string) => (typeof k === 'string' ? k.trim() : ''))
+		.filter((k: string) => k.length > 0);
+
+	const data: NicknameKeywordList = { keywords, lastUpdated: Date.now() };
+	await kv.put(KV_KEY, JSON.stringify(data));
+	return json({ success: true, data } satisfies ApiResponse<NicknameKeywordList>);
+};
+```
+
+**Step 2: Verify types**
+
+Run: `npm run check`
+Expected: No errors
+
+**Step 3: Commit**
+
+```bash
+git add src/routes/api/admin/chat/nicknames/+server.ts
+git commit -m "feat: add admin API for nickname keywords CRUD"
+```
+
+---
+
+### Task 4: Create public API for nickname keywords
+
+**Files:**
+- Create: `src/routes/api/chat/nicknames/+server.ts`
+
+**Step 1: Create the public endpoint**
+
+Follow the pattern from `src/routes/api/categories/+server.ts`.
+
+```typescript
+import { json, type RequestHandler } from '@sveltejs/kit';
+import type { ApiResponse, NicknameKeywordList } from '$lib/types';
+
+const KV_KEY = 'chat_nickname_keywords';
+
+export const GET: RequestHandler = async ({ platform }) => {
+	const kv = platform?.env.APP_KV;
+	if (!kv) {
+		return json({ success: true, data: { keywords: [], lastUpdated: Date.now() } } satisfies ApiResponse<NicknameKeywordList>);
+	}
+
+	const stored = await kv.get<NicknameKeywordList>(KV_KEY, 'json');
+	return json({ success: true, data: stored ?? { keywords: [], lastUpdated: Date.now() } } satisfies ApiResponse<NicknameKeywordList>);
+};
+```
+
+**Step 2: Verify types**
+
+Run: `npm run check`
+Expected: No errors
+
+**Step 3: Commit**
+
+```bash
+git add src/routes/api/chat/nicknames/+server.ts
+git commit -m "feat: add public API for nickname keywords"
+```
+
+---
+
+### Task 5: Add keyword config UI to ChatManager
+
+**Files:**
+- Modify: `src/lib/components/ChatManager.svelte`
+
+**Step 1: Add keyword management section**
+
+Add imports for `ApiResponse` and `NicknameKeywordList` (already has `ApiResponse`). Add state variables and functions for keyword management. Insert a keyword config section above the `💬 聊天记录管理` header.
+
+Key changes:
+1. Add `NicknameKeywordList` to type import
+2. Add state: `keywords`, `newKeyword`, `keywordsLoading`, `keywordsSaving`
+3. Add functions: `loadKeywords()`, `saveKeywords()`, `addKeyword()`, `removeKeyword(index)`
+4. Add `$effect` to call `loadKeywords()` on mount
+5. Add HTML section with tag-style keyword display + input + add/save buttons
+6. Add scoped CSS for the keyword tags and config section
+
+**Step 2: Verify types**
+
+Run: `npm run check`
+Expected: No errors
+
+**Step 3: Commit**
+
+```bash
+git add src/lib/components/ChatManager.svelte
+git commit -m "feat: add nickname keyword config UI to ChatManager"
+```
+
+---
+
+### Task 6: Update ChatWidget nickname generation
+
+**Files:**
+- Modify: `src/lib/components/ChatWidget.svelte`
+
+**Step 1: Modify nickname generation**
+
+Key changes:
+1. Import `generateRandomNickname` from `$lib/nickname`
+2. Remove old `generateGuestNickname()` function
+3. Add state for `nicknameKeywords: string[]`
+4. Add `fetchNicknameKeywords()` that calls `GET /api/chat/nicknames`
+5. In `onMount`: fetch keywords first, then generate nickname if no saved one (using `generateRandomNickname(keywords)`)
+6. Add `randomizeNickname()` function that generates new random nickname + saves to localStorage + sends rename event
+7. In the `nickname-row` section (non-editing state), add a 🎲 button next to the 修改 button
+
+**Step 2: Verify types**
+
+Run: `npm run check`
+Expected: No errors
+
+**Step 3: Commit**
+
+```bash
+git add src/lib/components/ChatWidget.svelte
+git commit -m "feat: use Dota 2 themed random nicknames in chat widget"
+```
+
+---
+
+### Task 7: Final verification
+
+**Step 1: Full type check**
+
+Run: `npm run check`
+Expected: No errors
+
+**Step 2: Full lint**
+
+Run: `npm run lint`
+Expected: No errors (or only pre-existing ones)
+
+**Step 3: Build test**
+
+Run: `npm run build`
+Expected: Build succeeds
+
+**Step 4: Commit all changes**
+
+```bash
+git add -A
+git commit -m "feat: complete Dota 2 themed nickname system with admin keyword config"
+```
