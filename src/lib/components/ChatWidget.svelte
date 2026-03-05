@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { ChatMessage, ChatServerEvent } from '$lib/types';
-	import type { ApiResponse, NicknameKeywordList } from '$lib/types';
+	import type { ChatMessage, ChatServerEvent, ApiResponse, NicknameKeywordList } from '$lib/types';
 	import { generateRandomNickname } from '$lib/nickname';
 
 	const NICKNAME_STORAGE_KEY = 'playdota2win_chat_nickname';
