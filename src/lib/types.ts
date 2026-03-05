@@ -137,10 +137,15 @@ export interface CategoryFormData {
 export interface Announcement {
 	id: string;
 	title: string;
-	content: string;      // Markdown 正文
-	visible: boolean;     // false 则对用户隐藏
-	pinned: boolean;      // 置顶（排在前面）
-	createdAt: number;    // Date.now()
+	/** Markdown 正文 */
+	content: string;
+	/** false 则对用户隐藏 */
+	visible: boolean;
+	/** 置顶（排在前面） */
+	pinned: boolean;
+	/** 创建时间 */
+	createdAt: number;
+	/** 更新时间 */
 	updatedAt: number;
 }
 
