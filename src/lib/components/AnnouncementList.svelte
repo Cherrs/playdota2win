@@ -8,6 +8,7 @@
 	async function loadAnnouncements() {
 		try {
 			const res = await fetch('/api/announcements');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data: ApiResponse<AnnouncementListData> = await res.json();
 			if (data.success && data.data) {
 				announcements = data.data.items;
