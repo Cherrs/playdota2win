@@ -57,6 +57,21 @@ export class ChatRoom extends DurableObject<App.Platform['env']> {
 	private sessions = new Map<WebSocket, SessionState>();
 
 	async fetch(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+
+		// Admin API: list messages
+		if (url.pathname === '/admin/messages' && request.method === 'GET') {
+			return this.handleAdminList(url);
+		}
+		// Admin API: delete messages
+		if (url.pathname === '/admin/messages' && request.method === 'DELETE') {
+			return this.handleAdminDelete(request);
+		}
+		// Admin API: clear all messages
+		if (url.pathname === '/admin/messages/clear' && request.method === 'POST') {
+			return this.handleAdminClearAll();
+		}
+
 		if (request.method !== 'GET') {
 			return new Response('Method not allowed', { status: 405 });
 		}
@@ -79,6 +94,61 @@ export class ChatRoom extends DurableObject<App.Platform['env']> {
 		this.broadcastPresence();
 
 		return new Response(null, { status: 101, webSocket: client });
+	}
+
+	private async handleAdminList(url: URL): Promise<Response> {
+		const limit = Math.min(Number(url.searchParams.get('limit')) || 100, 500);
+		const before = url.searchParams.get('before');
+
+		const options: DurableObjectListOptions = {
+			prefix: CHAT_MESSAGE_KEY_PREFIX,
+			reverse: true,
+			limit
+		};
+		if (before) {
+			options.end = `${CHAT_MESSAGE_KEY_PREFIX}${before}`;
+		}
+
+		const result = await this.ctx.storage.list<ChatMessage>(options);
+		const messages = Array.from(result.values());
+		messages.sort((a, b) => b.timestamp - a.timestamp);
+
+		return new Response(JSON.stringify({ messages, hasMore: result.size === limit }), {
+			headers: { 'Content-Type': 'application/json' }
+		});
+	}
+
+	private async handleAdminDelete(request: Request): Promise<Response> {
+		const body = (await request.json()) as { ids?: string[] };
+		if (!Array.isArray(body.ids) || body.ids.length === 0) {
+			return new Response(JSON.stringify({ error: '缺少消息ID' }), { status: 400 });
+		}
+
+		// Find keys matching the given message IDs
+		const allMessages = await this.ctx.storage.list<ChatMessage>({
+			prefix: CHAT_MESSAGE_KEY_PREFIX
+		});
+		const idsToDelete = new Set(body.ids);
+		const keysToDelete: string[] = [];
+		for (const [key, msg] of allMessages.entries()) {
+			if (idsToDelete.has(msg.id)) {
+				keysToDelete.push(key);
+			}
+		}
+
+		if (keysToDelete.length > 0) {
+			await this.ctx.storage.delete(keysToDelete);
+		}
+		return new Response(JSON.stringify({ deleted: keysToDelete.length }));
+	}
+
+	private async handleAdminClearAll(): Promise<Response> {
+		const allMessages = await this.ctx.storage.list({ prefix: CHAT_MESSAGE_KEY_PREFIX });
+		const keys = Array.from(allMessages.keys());
+		if (keys.length > 0) {
+			await this.ctx.storage.delete(keys);
+		}
+		return new Response(JSON.stringify({ deleted: keys.length }));
 	}
 
 	private bindSocket(ws: WebSocket): void {
