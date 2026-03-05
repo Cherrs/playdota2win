@@ -1,0 +1,120 @@
+/* Admin panel shared design tokens and utility classes.
+   Import in any admin component:  import '$lib/styles/admin-form.css';
+   Svelte deduplicates the import so it is only bundled once.
+*/
+
+:root {
+	--admin-input-border: 2px solid #e6e0f0;
+	--admin-input-radius: 12px;
+	--admin-input-padding: 0.75rem 1rem;
+	--admin-input-focus-border: #6b4c9a;
+	--admin-input-focus-shadow: 0 0 0 3px rgba(107, 76, 154, 0.15);
+	--admin-label-color: #6b4c9a;
+	--admin-label-weight: 600;
+	--admin-label-size: 0.9rem;
+	--admin-btn-radius: 12px;
+	--admin-btn-padding: 0.75rem 1.5rem;
+	--admin-btn-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	--admin-btn-danger-bg: rgba(255, 107, 107, 0.15);
+	--admin-btn-danger-color: #c8556b;
+	--admin-checkbox-accent: #6b4c9a;
+}
+
+/* ── Input / Select / Textarea ─────────────────────── */
+.admin-input {
+	width: 100%;
+	padding: var(--admin-input-padding);
+	border: var(--admin-input-border);
+	border-radius: var(--admin-input-radius);
+	font-size: 0.9rem;
+	font-family: 'Nunito', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+	box-sizing: border-box;
+	transition: all 0.3s ease;
+	outline: none;
+	background: white;
+}
+
+.admin-input:focus {
+	border-color: var(--admin-input-focus-border);
+	box-shadow: var(--admin-input-focus-shadow);
+}
+
+/* ── Label ─────────────────────────────────────────── */
+.admin-label {
+	display: block;
+	font-size: var(--admin-label-size);
+	font-weight: var(--admin-label-weight);
+	color: var(--admin-label-color);
+	margin-bottom: 0.4rem;
+}
+
+/* ── Base button ───────────────────────────────────── */
+.admin-btn {
+	padding: var(--admin-btn-padding);
+	border: none;
+	border-radius: var(--admin-btn-radius);
+	font-size: 0.9rem;
+	font-family: inherit;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+}
+
+.admin-btn:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* ── Primary button ────────────────────────────────── */
+.admin-btn-primary {
+	background: var(--admin-btn-gradient);
+	color: white;
+}
+
+.admin-btn-primary:hover:not(:disabled) {
+	transform: translateY(-2px);
+	box-shadow: 0 8px 20px rgba(102, 126, 234, 0.35);
+}
+
+/* ── Ghost / outline button ────────────────────────── */
+.admin-btn-ghost {
+	background: transparent;
+	border: 2px solid #6b4c9a;
+	color: #6b4c9a;
+}
+
+.admin-btn-ghost:hover:not(:disabled) {
+	background: rgba(107, 76, 154, 0.08);
+}
+
+/* ── Soft / tonal button ───────────────────────────── */
+.admin-btn-soft {
+	background: rgba(107, 76, 154, 0.1);
+	color: #6b4c9a;
+}
+
+.admin-btn-soft:hover:not(:disabled) {
+	background: rgba(107, 76, 154, 0.2);
+}
+
+/* ── Danger button ─────────────────────────────────── */
+.admin-btn-danger {
+	background: var(--admin-btn-danger-bg);
+	color: var(--admin-btn-danger-color);
+}
+
+.admin-btn-danger:hover:not(:disabled) {
+	background: rgba(255, 107, 107, 0.25);
+}
+
+/* ── Checkbox ──────────────────────────────────────── */
+.admin-checkbox {
+	accent-color: var(--admin-checkbox-accent);
+	width: 16px;
+	height: 16px;
+	cursor: pointer;
+}

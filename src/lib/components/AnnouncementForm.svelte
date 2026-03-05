@@ -5,6 +5,7 @@
 		AnnouncementFormData,
 		ApiResponse
 	} from '$lib/types';
+	import '$lib/styles/admin-form.css';
 
 	interface Props {
 		token: string;
@@ -186,41 +187,48 @@
 	<div class="form-card">
 		<h4 class="form-title">{editingId ? '编辑公告' : '新增公告'}</h4>
 		<div class="form-field">
-			<label for="ann-title">标题</label>
+			<label for="ann-title" class="admin-label">标题</label>
 			<input
 				id="ann-title"
 				type="text"
 				bind:value={formTitle}
 				placeholder="公告标题"
-				class="form-input"
+				class="form-input admin-input"
 			/>
 		</div>
 		<div class="form-field">
-			<label for="ann-content">内容（Markdown）</label>
+			<label for="ann-content" class="admin-label">内容（Markdown）</label>
 			<textarea
 				id="ann-content"
 				bind:value={formContent}
 				placeholder="支持 **加粗**、[链接](url)、- 列表等 Markdown 格式"
-				class="form-textarea"
+				class="form-textarea admin-input"
 				rows="5"
 			></textarea>
 		</div>
 		<div class="form-row">
 			<label class="checkbox-label">
-				<input type="checkbox" bind:checked={formVisible} />
+				<input type="checkbox" class="admin-checkbox" bind:checked={formVisible} />
 				<span>显示</span>
 			</label>
 			<label class="checkbox-label">
-				<input type="checkbox" bind:checked={formPinned} />
+				<input type="checkbox" class="admin-checkbox" bind:checked={formPinned} />
 				<span>置顶</span>
 			</label>
 		</div>
 		<div class="form-actions">
-			<button class="btn btn-primary" onclick={handleSubmit} disabled={submitting} type="button">
+			<button
+				class="btn admin-btn admin-btn-primary"
+				onclick={handleSubmit}
+				disabled={submitting}
+				type="button"
+			>
 				{submitting ? '提交中...' : editingId ? '保存修改' : '发布公告'}
 			</button>
 			{#if editingId}
-				<button class="btn btn-outline" onclick={cancelEdit} type="button">取消</button>
+				<button class="btn admin-btn admin-btn-ghost" onclick={cancelEdit} type="button"
+					>取消</button
+				>
 			{/if}
 		</div>
 	</div>
@@ -311,22 +319,17 @@
 	}
 
 	.form-field label {
-		display: block;
-		font-size: 0.85rem;
-		color: #555;
 		margin-bottom: 0.35rem;
 	}
 
 	.form-input,
 	.form-textarea {
-		width: 100%;
-		padding: 0.6rem 0.8rem;
-		border: 1px solid rgba(107, 76, 154, 0.3);
-		border-radius: 12px;
-		font-size: 0.9rem;
-		font-family: 'Nunito', sans-serif;
-		box-sizing: border-box;
 		resize: vertical;
+	}
+
+	.btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.form-row {
@@ -346,31 +349,6 @@
 	.form-actions {
 		display: flex;
 		gap: 0.75rem;
-	}
-
-	.btn {
-		padding: 0.5rem 1.25rem;
-		border-radius: 12px;
-		border: none;
-		font-size: 0.9rem;
-		cursor: pointer;
-		transition: opacity 0.2s;
-	}
-
-	.btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-primary {
-		background: linear-gradient(135deg, #6b4c9a, #ff6b9d);
-		color: white;
-	}
-
-	.btn-outline {
-		background: transparent;
-		border: 1px solid #6b4c9a;
-		color: #6b4c9a;
 	}
 
 	.loading-text,

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ChatMessage, ApiResponse, NicknameKeywordList } from '$lib/types';
 	import { SvelteSet } from 'svelte/reactivity';
+	import '$lib/styles/admin-form.css';
 
 	interface Props {
 		token: string;
@@ -225,7 +226,7 @@
 			<div class="keywords-input-row">
 				<input
 					type="text"
-					class="keyword-input"
+					class="keyword-input admin-input"
 					placeholder="输入关键字（如：大飞）"
 					maxlength={10}
 					bind:value={newKeyword}
@@ -233,7 +234,11 @@
 						if (e.key === 'Enter') addKeyword();
 					}}
 				/>
-				<button class="btn btn-add" onclick={addKeyword} disabled={!newKeyword.trim()}>
+				<button
+					class="btn btn-add admin-btn admin-btn-soft"
+					onclick={addKeyword}
+					disabled={!newKeyword.trim()}
+				>
 					➕ 添加
 				</button>
 			</div>
@@ -251,7 +256,11 @@
 			</div>
 
 			<div class="keywords-actions">
-				<button class="btn btn-save" onclick={saveKeywords} disabled={keywordsSaving}>
+				<button
+					class="btn btn-save admin-btn admin-btn-primary"
+					onclick={saveKeywords}
+					disabled={keywordsSaving}
+				>
 					{keywordsSaving ? '保存中...' : '💾 保存关键字'}
 				</button>
 			</div>
@@ -261,17 +270,27 @@
 	<div class="manager-header">
 		<h2>💬 聊天记录管理</h2>
 		<div class="header-actions">
-			<button class="btn btn-refresh" onclick={() => loadMessages()} disabled={loading}>
+			<button
+				class="btn btn-refresh admin-btn admin-btn-soft"
+				onclick={() => loadMessages()}
+				disabled={loading}
+			>
 				🔄 刷新
 			</button>
 			<button
-				class="btn btn-delete"
+				class="btn btn-delete admin-btn admin-btn-danger"
 				onclick={deleteSelected}
 				disabled={selectedIds.size === 0 || deleting}
 			>
 				🗑️ 删除选中 ({selectedIds.size})
 			</button>
-			<button class="btn btn-danger" onclick={clearAll} disabled={deleting}> ⚠️ 清空所有 </button>
+			<button
+				class="btn btn-danger admin-btn admin-btn-danger"
+				onclick={clearAll}
+				disabled={deleting}
+			>
+				⚠️ 清空所有
+			</button>
 		</div>
 	</div>
 
@@ -346,7 +365,11 @@
 
 		{#if hasMore}
 			<div class="load-more">
-				<button class="btn btn-secondary" onclick={() => loadMessages(true)} disabled={loading}>
+				<button
+					class="btn btn-secondary admin-btn admin-btn-soft"
+					onclick={() => loadMessages(true)}
+					disabled={loading}
+				>
 					{loading ? '加载中...' : '加载更多'}
 				</button>
 			</div>
@@ -387,54 +410,7 @@
 	}
 
 	.btn {
-		padding: 0.5rem 1rem;
-		border: none;
-		border-radius: 12px;
-		font-family: inherit;
 		font-size: 0.85rem;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.btn-refresh {
-		background: rgba(107, 76, 154, 0.1);
-		color: #6b4c9a;
-	}
-
-	.btn-refresh:hover:not(:disabled) {
-		background: rgba(107, 76, 154, 0.2);
-	}
-
-	.btn-delete {
-		background: rgba(255, 107, 107, 0.1);
-		color: #c8556b;
-	}
-
-	.btn-delete:hover:not(:disabled) {
-		background: rgba(255, 107, 107, 0.2);
-	}
-
-	.btn-danger {
-		background: rgba(255, 59, 48, 0.1);
-		color: #ff3b30;
-	}
-
-	.btn-danger:hover:not(:disabled) {
-		background: rgba(255, 59, 48, 0.2);
-	}
-
-	.btn-secondary {
-		background: rgba(107, 76, 154, 0.1);
-		color: #6b4c9a;
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: rgba(107, 76, 154, 0.2);
 	}
 
 	.alert {
@@ -627,25 +603,11 @@
 	.keyword-input {
 		flex: 1;
 		max-width: 240px;
-		padding: 0.5rem 0.8rem;
-		border: 2px solid #eadbff;
-		border-radius: 12px;
-		font-size: 0.9rem;
-		outline: none;
-		font-family: inherit;
 	}
 
-	.keyword-input:focus {
-		border-color: #c8b2ff;
-	}
-
-	.btn-add {
-		background: rgba(107, 76, 154, 0.1);
-		color: #6b4c9a;
-	}
-
-	.btn-add:hover:not(:disabled) {
-		background: rgba(107, 76, 154, 0.2);
+	.keywords-actions {
+		display: flex;
+		gap: 0.5rem;
 	}
 
 	.keywords-tags {
@@ -692,25 +654,5 @@
 
 	.tag-remove:hover {
 		color: #ff6b9d;
-	}
-
-	.keywords-actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.btn-save {
-		background: linear-gradient(135deg, #ff8fbe 0%, #bfa5ff 100%);
-		color: #2f1a52;
-		font-weight: 700;
-	}
-
-	.btn-save:hover:not(:disabled) {
-		transform: translateY(-1px);
-		box-shadow: 0 4px 12px rgba(107, 76, 154, 0.2);
-	}
-
-	.btn-save:disabled {
-		opacity: 0.6;
 	}
 </style>

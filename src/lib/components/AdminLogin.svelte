@@ -5,6 +5,7 @@
 		resetTurnstile
 	} from '$lib/utils/turnstile-client';
 	import type { ApiResponse } from '$lib/types';
+	import '$lib/styles/admin-form.css';
 
 	interface Props {
 		onLoginSuccess: () => void;
@@ -167,6 +168,7 @@
 			<div class="login-input-group">
 				<input
 					type="password"
+					class="admin-input"
 					bind:value={password}
 					placeholder="输入管理密码"
 					autocomplete="current-password"
@@ -186,7 +188,7 @@
 
 			<button
 				type="submit"
-				class="login-btn"
+				class="login-btn admin-btn admin-btn-primary"
 				disabled={loading || (requireTurnstile && !turnstileToken)}
 			>
 				{#if loading}
@@ -258,38 +260,11 @@
 		gap: 1rem;
 	}
 
-	.login-input-group input {
-		width: 100%;
-		padding: 1rem 1.25rem;
-		border: 2px solid #e6e0f0;
-		border-radius: 12px;
-		font-size: 1rem;
-		font-family: inherit;
-		transition: all 0.3s ease;
-		box-sizing: border-box;
-	}
-
-	.login-input-group input:focus {
-		outline: none;
-		border-color: #6b4c9a;
-		box-shadow: 0 0 0 3px rgba(107, 76, 154, 0.2);
-	}
-
 	.login-btn {
-		padding: 1rem 2rem;
-		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-		color: white;
-		border: none;
-		border-radius: 20px;
-		font-size: 1.1rem;
-		font-family: inherit;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
+		/* admin-btn: padding, radius, font, cursor, transition
+		   admin-btn-primary: background gradient, color, hover transform+shadow */
+		font-size: 1rem;
+		width: 100%;
 		position: relative;
 		overflow: hidden;
 	}
