@@ -18,7 +18,7 @@
 		{/if}
 		<h3 class="card-title">{announcement.title}</h3>
 	</div>
-	<div class="card-content markdown-body">
+	<div class="card-content">
 		{@html htmlContent}
 	</div>
 </div>
@@ -30,6 +30,10 @@
 		border-radius: 20px;
 		padding: 1.25rem 1.5rem;
 		transition: box-shadow 0.3s ease;
+	}
+
+	.announcement-card:hover {
+		box-shadow: 0 4px 16px rgba(255, 160, 60, 0.2);
 	}
 
 	.announcement-card.pinned {
@@ -80,5 +84,24 @@
 
 	.card-content :global(p) {
 		margin: 0.25rem 0;
+	}
+
+	.card-content :global(em) {
+		font-style: italic;
+	}
+
+	.card-content :global(code) {
+		background: rgba(255, 160, 60, 0.12);
+		border-radius: 4px;
+		padding: 0.1em 0.35em;
+		font-size: 0.85em;
+		color: #7a4010;
+	}
+
+	.card-content :global(h3),
+	.card-content :global(h4) {
+		font-family: 'Fredoka', 'Nunito', sans-serif;
+		color: #8b5e1a;
+		margin: 0.5rem 0 0.25rem;
 	}
 </style>
