@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { ChatMessage, ChatServerEvent } from '$lib/types';
+	import type { ApiResponse, NicknameKeywordList } from '$lib/types';
+	import { generateRandomNickname } from '$lib/nickname';
 
 	const NICKNAME_STORAGE_KEY = 'playdota2win_chat_nickname';
 	const MAX_MESSAGE_LENGTH = 500;
@@ -18,14 +20,24 @@
 	let statusMessage = $state('未连接');
 	let errorMessage = $state('');
 	let messagesRef = $state<HTMLDivElement | null>(null);
+	let nicknameKeywords = $state<string[]>([]);
 
 	let socket: WebSocket | null = null;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let reconnectAttempts = 0;
 	let shouldReconnect = true;
 
-	function generateGuestNickname(): string {
-		return `游客${Math.floor(Math.random() * 9000 + 1000)}`;
+	async function fetchNicknameKeywords(): Promise<string[]> {
+		try {
+			const res = await fetch('/api/chat/nicknames');
+			const data: ApiResponse<NicknameKeywordList> = await res.json();
+			if (data.success && data.data) {
+				return data.data.keywords;
+			}
+		} catch {
+			// Fallback to empty keywords (will generate 游客+number)
+		}
+		return [];
 	}
 
 	function normalizeClientInput(value: string): string {
@@ -170,6 +182,16 @@
 		editingNickname = false;
 	}
 
+	function randomizeNickname(): void {
+		const newNickname = generateRandomNickname(nicknameKeywords);
+		nickname = newNickname;
+		nicknameDraft = newNickname;
+		localStorage.setItem(NICKNAME_STORAGE_KEY, newNickname);
+		if (connected) {
+			sendEvent({ type: 'rename', nickname: newNickname });
+		}
+	}
+
 	function submitMessage(): void {
 		const text = normalizeClientInput(pendingMessage);
 		if (!text) {
@@ -211,17 +233,21 @@
 	});
 
 	onMount(() => {
-		const savedNickname = localStorage.getItem(NICKNAME_STORAGE_KEY);
-		const normalizedNickname = normalizeClientInput(savedNickname || '').slice(
-			0,
-			MAX_NICKNAME_LENGTH
-		);
-		nickname = normalizedNickname || generateGuestNickname();
-		nicknameDraft = nickname;
-		localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
+		(async () => {
+			nicknameKeywords = await fetchNicknameKeywords();
 
-		shouldReconnect = true;
-		connect();
+			const savedNickname = localStorage.getItem(NICKNAME_STORAGE_KEY);
+			const normalizedNickname = normalizeClientInput(savedNickname || '').slice(
+				0,
+				MAX_NICKNAME_LENGTH
+			);
+			nickname = normalizedNickname || generateRandomNickname(nicknameKeywords);
+			nicknameDraft = nickname;
+			localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
+
+			shouldReconnect = true;
+			connect();
+		})();
 
 		return () => {
 			shouldReconnect = false;
@@ -272,6 +298,9 @@
 					<button class="small-btn ghost" type="button" onclick={cancelNicknameEdit}>取消</button>
 				{:else}
 					<span class="nickname-label">昵称：{nickname}</span>
+					<button class="small-btn ghost" type="button" onclick={randomizeNickname} title="随机昵称"
+						>🎲</button
+					>
 					<button class="small-btn ghost" type="button" onclick={startNicknameEdit}>修改</button>
 				{/if}
 			</div>
