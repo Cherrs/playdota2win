@@ -15,8 +15,8 @@
 	import GuideModal from '$lib/components/GuideModal.svelte';
 	import GuidePanel from '$lib/components/GuidePanel.svelte';
 	import AnnouncementList from '$lib/components/AnnouncementList.svelte';
-	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
 	import { onDestroy } from 'svelte';
+	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
 
 	// 数据状态
 	let downloadCount = $state(0);
@@ -261,9 +261,13 @@
 		return downloads.filter((item) => item.enabled && item.categoryId === selectedCategoryId);
 	}
 
-	// 初始加载
+	// 访客在线心跳（独立 effect 防止与数据加载 effect 耦合）
 	$effect(() => {
 		connectVisitorPresence();
+	});
+
+	// 初始加载
+	$effect(() => {
 		loadCategories();
 		loadDownloads();
 	});
