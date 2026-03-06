@@ -176,39 +176,116 @@ export interface NicknameKeywordList {
 }
 
 /**
- * 聊天消息
+ * 浏览器可公开读取的 Mumble 代理配置
  */
-export interface ChatMessage {
+export interface MumbleProxyConfig {
+	wsUrl: string;
+	stunServers: string[];
+}
+
+/**
+ * Mumble 代理健康检查结果
+ */
+export interface MumbleProxyHealth {
+	healthy: boolean;
+	status: number | null;
+	message: string;
+	checkedAt: number;
+	url: string;
+}
+
+/**
+ * Mumble 频道（前端展示用）
+ */
+export interface MumbleChannel {
+	id: number;
+	name: string;
+	parentId: number;
+	description: string;
+}
+
+/**
+ * Mumble 在线用户（前端展示用）
+ */
+export interface MumbleUser {
+	sessionId: number;
+	name: string;
+	channelId: number;
+	muted: boolean;
+	deafened: boolean;
+}
+
+/**
+ * Mumble 文本消息（浏览器会补充本地 ID 和时间戳）
+ */
+export interface MumbleTextMessage {
 	id: string;
-	nickname: string;
-	text: string;
+	sender: string;
+	message: string;
+	channelId: number;
 	timestamp: number;
 }
 
 /**
- * 客户端 -> 服务端 聊天事件
+ * Mumble 代理返回的原始频道数据
  */
-export type ChatClientEvent =
-	| { type: 'join'; nickname: string }
-	| { type: 'rename'; nickname: string }
-	| { type: 'message'; text: string };
-
-/**
- * 服务端 -> 客户端 聊天事件
- */
-export type ChatServerEvent =
-	| { type: 'history'; messages: ChatMessage[] }
-	| { type: 'message'; message: ChatMessage }
-	| { type: 'presence'; online: number }
-	| { type: 'error'; message: string };
-
-/**
- * 在线访客信息（用于管理后台展示）
- */
-export interface OnlineVisitor {
-	ip: string;
-	userAgent: string;
-	connectedAt: number;
-	/** 若访客未设置昵称则为 '游客' */
-	nickname: string;
+export interface MumbleProxyChannelPayload {
+	id: number;
+	name: string;
+	parent_id: number;
+	description: string;
 }
+
+/**
+ * Mumble 代理返回的原始用户数据
+ */
+export interface MumbleProxyUserPayload {
+	session_id: number;
+	name: string;
+	channel_id: number;
+	muted: boolean;
+	deafened: boolean;
+}
+
+/**
+ * 浏览器 -> Mumble 代理消息
+ */
+export type MumbleProxyClientEvent =
+	| { type: 'Connect'; nickname: string }
+	| { type: 'Disconnect' }
+	| { type: 'SdpOffer'; sdp: string }
+	| {
+			type: 'IceCandidate';
+			candidate: string;
+			sdp_mid: string | null;
+			sdp_mline_index: number | null;
+	  }
+	| { type: 'SwitchChannel'; channel_id: number }
+	| { type: 'SendChat'; channel_id: number; message: string }
+	| { type: 'SetMute'; muted: boolean }
+	| { type: 'SetDeaf'; deafened: boolean };
+
+/**
+ * Mumble 代理 -> 浏览器消息
+ */
+export type MumbleProxyServerEvent =
+	| { type: 'Connected'; session_id: number; username: string; channel_id: number }
+	| { type: 'Disconnected'; reason?: string }
+	| { type: 'SdpAnswer'; sdp: string }
+	| {
+			type: 'IceCandidate';
+			candidate: string;
+			sdp_mid: string | null;
+			sdp_mline_index: number | null;
+	  }
+	| { type: 'ChannelList'; channels: MumbleProxyChannelPayload[] }
+	| { type: 'UserList'; users: MumbleProxyUserPayload[] }
+	| { type: 'ChatMessage'; sender: string; message: string; channel_id: number }
+	| {
+			type: 'UserStateChanged';
+			session_id: number;
+			channel_id: number;
+			muted: boolean;
+			deafened: boolean;
+	  }
+	| { type: 'Error'; message: string };

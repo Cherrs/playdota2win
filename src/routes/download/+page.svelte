@@ -15,7 +15,6 @@
 	import GuideModal from '$lib/components/GuideModal.svelte';
 	import GuidePanel from '$lib/components/GuidePanel.svelte';
 	import AnnouncementList from '$lib/components/AnnouncementList.svelte';
-	import { onDestroy } from 'svelte';
 	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
 
 	// 数据状态
@@ -45,26 +44,6 @@
 	let isGuidePasswordVerified = $state(false);
 	let pendingGuideItem = $state<DownloadItem | null>(null);
 	let showGuidePasswordModal = $state(false);
-
-	// 访客在线状态（静默 WebSocket，仅用于管理端统计在线人数）
-	let visitorWs: WebSocket | null = null;
-
-	function connectVisitorPresence() {
-		if (typeof window === 'undefined') return;
-		try {
-			const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-			visitorWs = new WebSocket(`${protocol}//${window.location.host}/api/chat/ws`);
-			visitorWs.addEventListener('error', () => {
-				// silent – visitor presence is best-effort
-			});
-		} catch {
-			// silent
-		}
-	}
-
-	onDestroy(() => {
-		visitorWs?.close();
-	});
 
 	// Turnstile 状态
 	let requireTurnstile = $state(false);
@@ -260,11 +239,6 @@
 		}
 		return downloads.filter((item) => item.enabled && item.categoryId === selectedCategoryId);
 	}
-
-	// 访客在线心跳（独立 effect 防止与数据加载 effect 耦合）
-	$effect(() => {
-		connectVisitorPresence();
-	});
 
 	// 初始加载
 	$effect(() => {

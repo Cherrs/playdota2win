@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import favicon from '$lib/assets/favicon.svg';
-	import ChatWidget from '$lib/components/ChatWidget.svelte';
+	import MumbleWidget from '$lib/components/MumbleWidget.svelte';
 
 	let { children } = $props();
 </script>
@@ -10,4 +11,6 @@
 </svelte:head>
 
 {@render children()}
-<ChatWidget />
+{#if !page.url.pathname.startsWith('/admin')}
+	<MumbleWidget />
+{/if}

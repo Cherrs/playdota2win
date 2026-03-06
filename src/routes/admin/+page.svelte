@@ -13,13 +13,10 @@
 	import DownloadListComponent from '$lib/components/DownloadList.svelte';
 	import DownloadEditModal from '$lib/components/DownloadEditModal.svelte';
 	import AnnouncementForm from '$lib/components/AnnouncementForm.svelte';
-	import ChatManager from '$lib/components/ChatManager.svelte';
-	import OnlineVisitors from '$lib/components/OnlineVisitors.svelte';
+	import MumbleStatusPanel from '$lib/components/MumbleStatusPanel.svelte';
 
 	// Tab 状态
-	let adminTab = $state<'downloads' | 'categories' | 'announcements' | 'chat' | 'visitors'>(
-		'downloads'
-	);
+	let adminTab = $state<'downloads' | 'categories' | 'announcements' | 'mumble'>('downloads');
 	let adminToken = $state('');
 
 	// 认证状态
@@ -239,19 +236,11 @@
 			</button>
 			<button
 				class="tab-btn"
-				class:active={adminTab === 'chat'}
-				onclick={() => (adminTab = 'chat')}
+				class:active={adminTab === 'mumble'}
+				onclick={() => (adminTab = 'mumble')}
 				type="button"
 			>
-				聊天管理
-			</button>
-			<button
-				class="tab-btn"
-				class:active={adminTab === 'visitors'}
-				onclick={() => (adminTab = 'visitors')}
-				type="button"
-			>
-				👥 在线用户
+				🎧 Mumble 状态
 			</button>
 		</div>
 
@@ -291,12 +280,8 @@
 			<AnnouncementForm token={adminToken} />
 		{/if}
 
-		{#if adminTab === 'chat'}
-			<ChatManager token={adminToken} />
-		{/if}
-
-		{#if adminTab === 'visitors'}
-			<OnlineVisitors token={adminToken} />
+		{#if adminTab === 'mumble'}
+			<MumbleStatusPanel token={adminToken} />
 		{/if}
 	</div>
 {/if}
