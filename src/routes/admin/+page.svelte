@@ -17,7 +17,9 @@
 	import OnlineVisitors from '$lib/components/OnlineVisitors.svelte';
 
 	// Tab 状态
-	let adminTab = $state<'downloads' | 'categories' | 'announcements' | 'chat' | 'visitors'>('downloads');
+	let adminTab = $state<'downloads' | 'categories' | 'announcements' | 'chat' | 'visitors'>(
+		'downloads'
+	);
 	let adminToken = $state('');
 
 	// 认证状态
