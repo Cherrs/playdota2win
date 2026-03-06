@@ -201,3 +201,14 @@ export type ChatServerEvent =
 	| { type: 'message'; message: ChatMessage }
 	| { type: 'presence'; online: number }
 	| { type: 'error'; message: string };
+
+/**
+ * 在线访客信息（用于管理后台展示）
+ */
+export interface OnlineVisitor {
+	ip: string;
+	userAgent: string;
+	connectedAt: number;
+	/** 若访客未设置昵称则为 '游客' */
+	nickname: string;
+}
