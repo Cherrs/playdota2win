@@ -14,9 +14,10 @@
 	import DownloadEditModal from '$lib/components/DownloadEditModal.svelte';
 	import AnnouncementForm from '$lib/components/AnnouncementForm.svelte';
 	import ChatManager from '$lib/components/ChatManager.svelte';
+	import OnlineVisitors from '$lib/components/OnlineVisitors.svelte';
 
 	// Tab 状态
-	let adminTab = $state<'downloads' | 'categories' | 'announcements' | 'chat'>('downloads');
+	let adminTab = $state<'downloads' | 'categories' | 'announcements' | 'chat' | 'visitors'>('downloads');
 	let adminToken = $state('');
 
 	// 认证状态
@@ -242,6 +243,14 @@
 			>
 				聊天管理
 			</button>
+			<button
+				class="tab-btn"
+				class:active={adminTab === 'visitors'}
+				onclick={() => (adminTab = 'visitors')}
+				type="button"
+			>
+				👥 在线用户
+			</button>
 		</div>
 
 		{#if adminTab === 'categories'}
@@ -282,6 +291,10 @@
 
 		{#if adminTab === 'chat'}
 			<ChatManager token={adminToken} />
+		{/if}
+
+		{#if adminTab === 'visitors'}
+			<OnlineVisitors token={adminToken} />
 		{/if}
 	</div>
 {/if}
