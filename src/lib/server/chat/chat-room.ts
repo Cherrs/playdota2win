@@ -13,10 +13,22 @@ import {
 interface SessionState {
 	nickname: string;
 	sentTimestamps: number[];
+	ip: string;
+	userAgent: string;
+	connectedAt: number;
 }
 
 const SOCKET_OPEN = 1;
 const HISTORY_MESSAGE_LIMIT = 200;
+
+function extractClientInfo(request: Request): { ip: string; userAgent: string } {
+	const ip =
+		request.headers.get('CF-Connecting-IP') ||
+		request.headers.get('X-Forwarded-For')?.split(',')[0].trim() ||
+		'unknown';
+	const userAgent = request.headers.get('User-Agent') || 'unknown';
+	return { ip, userAgent };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null;
@@ -71,6 +83,10 @@ export class ChatRoom extends DurableObject<App.Platform['env']> {
 		if (url.pathname === '/admin/messages/clear' && request.method === 'POST') {
 			return this.handleAdminClearAll();
 		}
+		// Admin API: list online visitors
+		if (url.pathname === '/admin/online' && request.method === 'GET') {
+			return this.handleAdminOnline();
+		}
 
 		if (request.method !== 'GET') {
 			return new Response('Method not allowed', { status: 405 });
@@ -84,9 +100,13 @@ export class ChatRoom extends DurableObject<App.Platform['env']> {
 		const server = pair[1];
 
 		server.accept();
+		const { ip, userAgent } = extractClientInfo(request);
 		this.sessions.set(server, {
 			nickname: DEFAULT_CHAT_NICKNAME,
-			sentTimestamps: []
+			sentTimestamps: [],
+			ip,
+			userAgent,
+			connectedAt: Date.now()
 		});
 		this.bindSocket(server);
 
@@ -149,6 +169,26 @@ export class ChatRoom extends DurableObject<App.Platform['env']> {
 			await this.ctx.storage.delete(keys);
 		}
 		return new Response(JSON.stringify({ deleted: keys.length }));
+	}
+
+	private handleAdminOnline(): Response {
+		const visitors: Array<{
+			ip: string;
+			userAgent: string;
+			connectedAt: number;
+			nickname: string;
+		}> = [];
+		for (const session of this.sessions.values()) {
+			visitors.push({
+				ip: session.ip,
+				userAgent: session.userAgent,
+				connectedAt: session.connectedAt,
+				nickname: session.nickname
+			});
+		}
+		return new Response(JSON.stringify({ visitors, total: visitors.length }), {
+			headers: { 'Content-Type': 'application/json' }
+		});
 	}
 
 	private bindSocket(ws: WebSocket): void {
