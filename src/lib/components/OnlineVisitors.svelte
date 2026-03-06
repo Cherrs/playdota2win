@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { OnlineVisitor, ApiResponse } from '$lib/types';
-	import { onDestroy } from 'svelte';
 
 	interface Props {
 		token: string;
@@ -10,7 +9,7 @@
 
 	let visitors = $state<OnlineVisitor[]>([]);
 	let total = $state(0);
-	let loading = $state(false);
+	let loading = $state(true);
 	let error = $state('');
 	let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -19,7 +18,7 @@
 	}
 
 	async function loadVisitors() {
-		loading = true;
+		if (visitors.length === 0) loading = true;
 		error = '';
 		try {
 			const res = await fetch('/api/admin/online', { headers: authHeaders() });
@@ -65,10 +64,6 @@
 			if (intervalId !== null) clearInterval(intervalId);
 		};
 	});
-
-	onDestroy(() => {
-		if (intervalId !== null) clearInterval(intervalId);
-	});
 </script>
 
 <div class="online-visitors">
@@ -99,7 +94,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each visitors as visitor, i}
+					{#each visitors as visitor, i (`${visitor.ip}-${visitor.connectedAt}`)}
 						<tr>
 							<td class="num">{i + 1}</td>
 							<td class="ip">{visitor.ip}</td>
