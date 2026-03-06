@@ -21,10 +21,19 @@
 	let messagesRef = $state<HTMLDivElement | null>(null);
 	let nicknameKeywords = $state<string[]>([]);
 
+	// Notification state
+	let unreadCount = $state(0);
+	let animateToggle = $state(false);
+	let newMsgPreview = $state<{ nickname: string; text: string } | null>(null);
+	let showScrollToBottom = $state(false);
+	let newMsgIds = $state<Set<string>>(new Set());
+
 	let socket: WebSocket | null = null;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let reconnectAttempts = 0;
 	let shouldReconnect = true;
+	let previewTimer: ReturnType<typeof setTimeout> | null = null;
+	let animateTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function fetchNicknameKeywords(): Promise<string[]> {
 		try {
@@ -84,14 +93,58 @@
 		return deduped;
 	}
 
+	function triggerNewMessageNotification(msg: ChatMessage): void {
+		// Mark as new for entrance animation
+		newMsgIds = new Set([...newMsgIds, msg.id]);
+		setTimeout(() => {
+			newMsgIds = new Set([...newMsgIds].filter((id) => id !== msg.id));
+		}, 800);
+
+		if (!expanded) {
+			// Increment unread badge
+			unreadCount += 1;
+
+			// Trigger toggle shake
+			animateToggle = false;
+			if (animateTimer) clearTimeout(animateTimer);
+			requestAnimationFrame(() => {
+				animateToggle = true;
+				animateTimer = setTimeout(() => {
+					animateToggle = false;
+				}, 600);
+			});
+
+			// Show preview toast
+			newMsgPreview = { nickname: msg.nickname, text: msg.text };
+			if (previewTimer) clearTimeout(previewTimer);
+			previewTimer = setTimeout(() => {
+				newMsgPreview = null;
+			}, 4000);
+		} else {
+			// In open chat: show scroll-to-bottom pill if user scrolled up
+			if (messagesRef) {
+				const el = messagesRef;
+				const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+				if (!isAtBottom) {
+					showScrollToBottom = true;
+				}
+			}
+		}
+	}
+
 	function applyServerEvent(event: ChatServerEvent): void {
 		switch (event.type) {
 			case 'history':
 				messages = mergeMessages(messages, event.messages);
 				break;
-			case 'message':
+			case 'message': {
+				const isNew = !messages.some((m) => m.id === event.message.id);
 				messages = mergeMessages(messages, [event.message]);
+				if (isNew) {
+					triggerNewMessageNotification(event.message);
+				}
 				break;
+			}
 			case 'presence':
 				onlineCount = event.online;
 				break;
@@ -217,6 +270,30 @@
 		});
 	}
 
+	function handleMessageScroll(): void {
+		if (!messagesRef) return;
+		const el = messagesRef;
+		const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+		if (isAtBottom) showScrollToBottom = false;
+	}
+
+	function scrollToLatest(): void {
+		messagesRef?.scrollTo({ top: messagesRef.scrollHeight, behavior: 'smooth' });
+		showScrollToBottom = false;
+	}
+
+	// Clear unread + preview when chat opens
+	$effect(() => {
+		if (expanded) {
+			unreadCount = 0;
+			newMsgPreview = null;
+			if (previewTimer) {
+				clearTimeout(previewTimer);
+				previewTimer = null;
+			}
+		}
+	});
+
 	$effect(() => {
 		void messages.length;
 		void expanded;
@@ -224,10 +301,12 @@
 			return;
 		}
 		queueMicrotask(() => {
-			messagesRef?.scrollTo({
-				top: messagesRef.scrollHeight,
-				behavior: 'smooth'
-			});
+			if (!showScrollToBottom) {
+				messagesRef?.scrollTo({
+					top: messagesRef.scrollHeight,
+					behavior: 'smooth'
+				});
+			}
 		});
 	});
 
@@ -253,6 +332,14 @@
 			if (reconnectTimer) {
 				clearTimeout(reconnectTimer);
 				reconnectTimer = null;
+			}
+			if (previewTimer) {
+				clearTimeout(previewTimer);
+				previewTimer = null;
+			}
+			if (animateTimer) {
+				clearTimeout(animateTimer);
+				animateTimer = null;
 			}
 			if (socket) {
 				socket.close(1000, 'chat widget unmounted');
@@ -313,12 +400,12 @@
 				<p class="error-text">{errorMessage}</p>
 			{/if}
 
-			<div class="message-list" bind:this={messagesRef}>
+			<div class="message-list" bind:this={messagesRef} onscroll={handleMessageScroll}>
 				{#if messages.length === 0}
 					<p class="empty-text">还没有留言，发一条试试吧～</p>
 				{/if}
 				{#each messages as message (message.id)}
-					<article class="message-item">
+					<article class="message-item" class:msg-new={newMsgIds.has(message.id)}>
 						<div class="message-meta">
 							<strong>{message.nickname}</strong>
 							<time>{formatTime(message.timestamp)}</time>
@@ -327,6 +414,15 @@
 					</article>
 				{/each}
 			</div>
+
+			{#if showScrollToBottom}
+				<button class="scroll-to-bottom" type="button" onclick={scrollToLatest} aria-live="polite">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<polyline points="6 9 12 15 18 9"></polyline>
+					</svg>
+					新消息
+				</button>
+			{/if}
 
 			<div class="input-row">
 				<input
@@ -347,15 +443,27 @@
 			</div>
 		</section>
 	{:else}
+		{#if newMsgPreview}
+			<div class="msg-preview" role="status" aria-live="polite">
+				<span class="preview-nick">{newMsgPreview.nickname}</span>
+				<span class="preview-text">{newMsgPreview.text.slice(0, 48)}{newMsgPreview.text.length > 48 ? '…' : ''}</span>
+			</div>
+		{/if}
 		<button
 			class="chat-toggle"
+			class:toggle-shake={animateToggle}
 			type="button"
 			onclick={() => (expanded = true)}
 			aria-label="打开聊天窗口"
 		>
-			<span class="toggle-icon">💬</span>
+			<svg class="toggle-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+			</svg>
 			<span class="toggle-text">在线聊天</span>
 			<span class="toggle-online">在线 {onlineCount}</span>
+			{#if unreadCount > 0}
+				<span class="unread-badge" class:badge-pop={animateToggle}>{unreadCount > 99 ? '99+' : unreadCount}</span>
+			{/if}
 		</button>
 	{/if}
 </div>
@@ -383,6 +491,7 @@
 		transition:
 			transform 0.3s ease,
 			box-shadow 0.3s ease;
+		position: relative;
 	}
 
 	.chat-toggle:hover {
@@ -390,8 +499,8 @@
 		box-shadow: 0 14px 28px rgba(107, 76, 154, 0.33);
 	}
 
-	.toggle-icon {
-		font-size: 1.1rem;
+	.toggle-icon-svg {
+		flex-shrink: 0;
 	}
 
 	.toggle-online {
@@ -611,6 +720,260 @@
 		.chat-panel {
 			width: min(350px, calc(100vw - 1.4rem));
 			max-height: min(540px, calc(100vh - 1.4rem));
+		}
+	}
+
+	/* ─────────────────────────────────────────────
+	   NOTIFICATION ANIMATIONS
+	   ───────────────────────────────────────────── */
+
+	/* Unread badge */
+	.unread-badge {
+		position: absolute;
+		top: -6px;
+		right: -6px;
+		min-width: 20px;
+		height: 20px;
+		padding: 0 5px;
+		border-radius: 999px;
+		background: #f43f5e;
+		color: #fff;
+		font-size: 0.7rem;
+		font-weight: 800;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-shadow:
+			0 0 0 2px #fff,
+			0 0 8px rgba(244, 63, 94, 0.7);
+		animation: neon-pulse 1.8s ease-in-out infinite;
+	}
+
+	.badge-pop {
+		animation:
+			badge-pop 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both,
+			neon-pulse 1.8s ease-in-out 0.45s infinite;
+	}
+
+	/* Toggle shake when new message arrives */
+	.toggle-shake {
+		animation: toggle-shake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+	}
+
+	/* Message preview toast */
+	.msg-preview {
+		position: absolute;
+		bottom: calc(100% + 10px);
+		right: 0;
+		width: min(280px, calc(100vw - 2.4rem));
+		background: rgba(255, 255, 255, 0.96);
+		backdrop-filter: blur(12px);
+		border-radius: 16px;
+		padding: 0.65rem 0.85rem;
+		box-shadow:
+			0 8px 24px rgba(107, 76, 154, 0.22),
+			0 0 0 1.5px rgba(200, 178, 255, 0.55),
+			0 0 16px rgba(200, 178, 255, 0.3);
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		animation: preview-slide-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+		cursor: pointer;
+	}
+
+	.msg-preview::before {
+		content: '';
+		position: absolute;
+		bottom: -6px;
+		right: 20px;
+		width: 12px;
+		height: 12px;
+		background: rgba(255, 255, 255, 0.96);
+		transform: rotate(45deg);
+		box-shadow: 2px 2px 4px rgba(107, 76, 154, 0.1);
+	}
+
+	.preview-nick {
+		font-size: 0.76rem;
+		font-weight: 700;
+		color: #6b4c9a;
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	.preview-nick::before {
+		content: '';
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: #f43f5e;
+		box-shadow: 0 0 6px rgba(244, 63, 94, 0.8);
+		flex-shrink: 0;
+	}
+
+	.preview-text {
+		font-size: 0.82rem;
+		color: #4d3a70;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* Scroll-to-bottom pill */
+	.scroll-to-bottom {
+		position: absolute;
+		bottom: 68px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: linear-gradient(135deg, #ff8fbe 0%, #a78bfa 100%);
+		color: #fff;
+		border: none;
+		border-radius: 999px;
+		padding: 0.35rem 0.85rem;
+		font-size: 0.78rem;
+		font-weight: 700;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		box-shadow:
+			0 4px 14px rgba(167, 139, 250, 0.5),
+			0 0 0 1.5px rgba(255, 255, 255, 0.4);
+		animation: scroll-btn-enter 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+		z-index: 5;
+		white-space: nowrap;
+	}
+
+	.scroll-to-bottom:hover {
+		box-shadow:
+			0 6px 18px rgba(167, 139, 250, 0.65),
+			0 0 12px rgba(255, 143, 190, 0.5);
+	}
+
+	/* New message entrance in list */
+	.msg-new {
+		animation: msg-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	/* chat-panel needs relative for scroll-to-bottom pill positioning */
+	.chat-panel {
+		position: relative;
+	}
+
+	/* ─── Keyframes ─── */
+
+	@keyframes neon-pulse {
+		0%,
+		100% {
+			box-shadow:
+				0 0 0 2px #fff,
+				0 0 8px rgba(244, 63, 94, 0.7);
+		}
+		50% {
+			box-shadow:
+				0 0 0 2px #fff,
+				0 0 16px rgba(244, 63, 94, 0.95),
+				0 0 28px rgba(244, 63, 94, 0.45);
+		}
+	}
+
+	@keyframes badge-pop {
+		0% {
+			transform: scale(1);
+		}
+		30% {
+			transform: scale(1.55);
+		}
+		55% {
+			transform: scale(0.88);
+		}
+		75% {
+			transform: scale(1.18);
+		}
+		100% {
+			transform: scale(1);
+		}
+	}
+
+	@keyframes toggle-shake {
+		0% {
+			transform: translateY(-2px) rotate(0deg);
+		}
+		15% {
+			transform: translateY(-4px) rotate(-6deg);
+		}
+		30% {
+			transform: translateY(-4px) rotate(5deg);
+		}
+		45% {
+			transform: translateY(-3px) rotate(-4deg);
+		}
+		60% {
+			transform: translateY(-2px) rotate(3deg);
+		}
+		75% {
+			transform: translateY(-2px) rotate(-2deg);
+		}
+		100% {
+			transform: translateY(-2px) rotate(0deg);
+		}
+	}
+
+	@keyframes preview-slide-in {
+		from {
+			opacity: 0;
+			transform: translateY(10px) scale(0.95);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
+	@keyframes scroll-btn-enter {
+		from {
+			opacity: 0;
+			transform: translateX(-50%) translateY(8px) scale(0.9);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(-50%) translateY(0) scale(1);
+		}
+	}
+
+	@keyframes msg-enter {
+		from {
+			opacity: 0;
+			transform: translateX(18px);
+			box-shadow: 0 0 0 2px rgba(200, 178, 255, 0);
+		}
+		40% {
+			box-shadow:
+				0 0 0 2px rgba(200, 178, 255, 0.6),
+				0 0 16px rgba(200, 178, 255, 0.4);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(0);
+			box-shadow: 0 0 0 2px rgba(200, 178, 255, 0);
+		}
+	}
+
+	/* Respect prefers-reduced-motion */
+	@media (prefers-reduced-motion: reduce) {
+		.unread-badge,
+		.badge-pop,
+		.toggle-shake,
+		.msg-preview,
+		.scroll-to-bottom,
+		.msg-new {
+			animation: none;
+		}
+
+		.toggle-shake {
+			transform: translateY(-2px);
 		}
 	}
 </style>
