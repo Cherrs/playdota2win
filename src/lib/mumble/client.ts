@@ -99,21 +99,23 @@ function normalizeUser(user: MumbleProxyUserPayload): MumbleUser {
 		sessionId: user.session_id,
 		name: sanitizeString(user.name, 32),
 		channelId: user.channel_id,
-		muted: user.muted,
-		deafened: user.deafened
+		muted: user.mute,
+		deafened: user.deaf,
+		selfMuted: user.self_mute,
+		selfDeafened: user.self_deaf
 	};
 }
 
 const KNOWN_SERVER_EVENT_TYPES = new Set([
-	'Connected',
-	'Disconnected',
-	'SdpAnswer',
-	'IceCandidate',
-	'ChannelList',
-	'UserList',
-	'ChatMessage',
-	'UserStateChanged',
-	'Error'
+	'connected',
+	'answer',
+	'ice_candidate',
+	'channel_updated',
+	'user_joined',
+	'user_left',
+	'user_state',
+	'chat_received',
+	'error'
 ]);
 
 function parseServerEvent(raw: string): MumbleProxyServerEvent | null {
@@ -353,10 +355,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			}
 
 			sendEvent({
-				type: 'IceCandidate',
-				candidate: candidate.candidate,
-				sdp_mid: candidate.sdpMid,
-				sdp_mline_index: candidate.sdpMLineIndex
+				type: 'ice_candidate',
+				data: {
+					candidate: candidate.candidate,
+					sdp_mid: candidate.sdpMid,
+					sdp_mline_index: candidate.sdpMLineIndex
+				}
 			});
 		};
 
@@ -384,7 +388,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			throw new Error('Missing SDP offer payload');
 		}
 
-		sendEvent({ type: 'SdpOffer', sdp: offer.sdp });
+		sendEvent({ type: 'offer', data: { sdp: offer.sdp } });
 	}
 
 	async function ensureVoice(): Promise<void> {
@@ -492,20 +496,26 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		}
 
 		switch (parsed.type) {
-			case 'Connected': {
+			case 'connected': {
 				reconnectAttempts = 0;
+				const normalizedUsers = parsed.data.users.map(normalizeUser);
+				const normalizedChannels = parsed.data.channels.map(normalizeChannel);
+				const selfUser = normalizedUsers.find((u) => u.sessionId === parsed.data.session_id);
 				patch({
 					status: 'connected',
 					connected: true,
 					reconnecting: false,
 					errorMessage: '',
-					username: parsed.username,
-					sessionId: parsed.session_id,
-					currentChannelId: parsed.channel_id
+					username: selfUser?.name ?? nickname,
+					sessionId: parsed.data.session_id,
+					currentChannelId: selfUser?.channelId ?? null,
+					users: normalizedUsers,
+					onlineCount: normalizedUsers.length,
+					channels: normalizedChannels
 				});
 
 				if (mode === 'monitor') {
-					sendEvent({ type: 'SetDeaf', deafened: true });
+					sendEvent({ type: 'deafen', data: { deafened: true } });
 					patch({ deafened: true });
 				} else if (pendingVoiceRequest) {
 					pendingVoiceRequest = false;
@@ -515,67 +525,69 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				}
 				return;
 			}
-			case 'SdpAnswer':
+			case 'answer':
 				if (!peerConnection) {
 					return;
 				}
 
 				await peerConnection.setRemoteDescription({
 					type: 'answer',
-					sdp: parsed.sdp
+					sdp: parsed.data.sdp
 				});
 				return;
-			case 'IceCandidate':
+			case 'ice_candidate':
 				if (!peerConnection) {
 					return;
 				}
 
 				await peerConnection.addIceCandidate({
-					candidate: parsed.candidate,
-					sdpMid: parsed.sdp_mid,
-					sdpMLineIndex: parsed.sdp_mline_index
+					candidate: parsed.data.candidate,
+					sdpMid: parsed.data.sdp_mid,
+					sdpMLineIndex: parsed.data.sdp_mline_index
 				});
 				return;
-			case 'ChannelList':
-				patch({ channels: parsed.channels.map(normalizeChannel) });
+			case 'channel_updated':
+				patch({ channels: parsed.data.channels.map(normalizeChannel) });
 				return;
-			case 'UserList':
-				updateUsers(parsed.users.map(normalizeUser));
+			case 'user_joined':
+				updateUsers([...snapshot.users, normalizeUser(parsed.data)]);
 				return;
-			case 'ChatMessage': {
+			case 'user_left':
+				updateUsers(snapshot.users.filter((u) => u.sessionId !== parsed.data.session_id));
+				return;
+			case 'chat_received': {
 				const nextMessages = [
 					...snapshot.messages,
 					{
 						id: createMessageId(),
-						sender: sanitizeString(parsed.sender, 32),
-						message: sanitizeString(parsed.message, 2000),
-						channelId: parsed.channel_id,
-						timestamp: Date.now()
+						sender: sanitizeString(parsed.data.sender_name, 32),
+						message: sanitizeString(parsed.data.message, 2000),
+						channelId: parsed.data.channel_id,
+						timestamp: parsed.data.timestamp
 					}
 				].slice(-maxMessages);
 				patch({ messages: nextMessages });
 				return;
 			}
-			case 'UserStateChanged': {
+			case 'user_state': {
 				const nextUsers = snapshot.users.map((user) =>
-					user.sessionId === parsed.session_id
+					user.sessionId === parsed.data.session_id
 						? {
 								...user,
-								channelId: parsed.channel_id,
-								muted: parsed.muted,
-								deafened: parsed.deafened
+								...(parsed.data.channel_id != null && { channelId: parsed.data.channel_id }),
+								...(parsed.data.name != null && { name: sanitizeString(parsed.data.name, 32) }),
+								...(parsed.data.mute != null && { muted: parsed.data.mute }),
+								...(parsed.data.deaf != null && { deafened: parsed.data.deaf }),
+								...(parsed.data.self_mute != null && { selfMuted: parsed.data.self_mute }),
+								...(parsed.data.self_deaf != null && { selfDeafened: parsed.data.self_deaf })
 							}
 						: user
 				);
 				updateUsers(nextUsers);
 				return;
 			}
-			case 'Error':
-				patch({ errorMessage: parsed.message });
-				return;
-			case 'Disconnected':
-				patch({ disconnectReason: parsed.reason ?? '连接已断开' });
-				socket?.close(1000, parsed.reason ?? 'proxy disconnected');
+			case 'error':
+				patch({ errorMessage: parsed.data.message });
 				return;
 		}
 	}
@@ -607,7 +619,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		socket = nextSocket;
 
 		nextSocket.onopen = () => {
-			sendEvent({ type: 'Connect', nickname });
+			sendEvent({ type: 'connect', data: { username: nickname } });
 		};
 
 		nextSocket.onmessage = (event) => {
@@ -642,7 +654,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			existingSocket.onclose = null;
 			try {
 				existingSocket.send(
-					JSON.stringify({ type: 'Disconnect' } satisfies MumbleProxyClientEvent)
+					JSON.stringify({ type: 'disconnect' } satisfies MumbleProxyClientEvent)
 				);
 			} catch {
 				// Ignore close-time send failures.
@@ -693,16 +705,15 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 	function sendChat(message: string): void {
 		sendEvent({
-			type: 'SendChat',
-			channel_id: 0,
-			message
+			type: 'chat_send',
+			data: { channel_id: snapshot.currentChannelId ?? 0, message }
 		});
 	}
 
 	function switchChannel(channelId: number): void {
 		sendEvent({
-			type: 'SwitchChannel',
-			channel_id: channelId
+			type: 'channel_join',
+			data: { channel_id: channelId }
 		});
 	}
 
@@ -714,7 +725,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		}
 
 		patch({ muted });
-		sendEvent({ type: 'SetMute', muted });
+		sendEvent({ type: 'mute', data: { muted } });
 	}
 
 	function setDeafened(deafened: boolean): void {
@@ -723,7 +734,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		}
 
 		patch({ deafened });
-		sendEvent({ type: 'SetDeaf', deafened });
+		sendEvent({ type: 'deafen', data: { deafened } });
 
 		if (!deafened) {
 			void resumeAudioPlayback();

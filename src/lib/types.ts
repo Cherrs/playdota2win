@@ -213,6 +213,8 @@ export interface MumbleUser {
 	channelId: number;
 	muted: boolean;
 	deafened: boolean;
+	selfMuted: boolean;
+	selfDeafened: boolean;
 }
 
 /**
@@ -243,49 +245,68 @@ export interface MumbleProxyUserPayload {
 	session_id: number;
 	name: string;
 	channel_id: number;
-	muted: boolean;
-	deafened: boolean;
+	mute: boolean;
+	deaf: boolean;
+	self_mute: boolean;
+	self_deaf: boolean;
 }
 
 /**
  * 浏览器 -> Mumble 代理消息
  */
 export type MumbleProxyClientEvent =
-	| { type: 'Connect'; nickname: string }
-	| { type: 'Disconnect' }
-	| { type: 'SdpOffer'; sdp: string }
+	| { type: 'connect'; data: { username: string } }
+	| { type: 'disconnect' }
+	| { type: 'offer'; data: { sdp: string } }
 	| {
-			type: 'IceCandidate';
-			candidate: string;
-			sdp_mid: string | null;
-			sdp_mline_index: number | null;
+			type: 'ice_candidate';
+			data: { candidate: string; sdp_mid: string | null; sdp_mline_index: number | null };
 	  }
-	| { type: 'SwitchChannel'; channel_id: number }
-	| { type: 'SendChat'; channel_id: number; message: string }
-	| { type: 'SetMute'; muted: boolean }
-	| { type: 'SetDeaf'; deafened: boolean };
+	| { type: 'channel_join'; data: { channel_id: number } }
+	| { type: 'chat_send'; data: { channel_id: number; message: string } }
+	| { type: 'mute'; data: { muted: boolean } }
+	| { type: 'deafen'; data: { deafened: boolean } };
 
 /**
  * Mumble 代理 -> 浏览器消息
  */
 export type MumbleProxyServerEvent =
-	| { type: 'Connected'; session_id: number; username: string; channel_id: number }
-	| { type: 'Disconnected'; reason?: string }
-	| { type: 'SdpAnswer'; sdp: string }
 	| {
-			type: 'IceCandidate';
-			candidate: string;
-			sdp_mid: string | null;
-			sdp_mline_index: number | null;
+			type: 'connected';
+			data: {
+				session_id: number;
+				channels: MumbleProxyChannelPayload[];
+				users: MumbleProxyUserPayload[];
+			};
 	  }
-	| { type: 'ChannelList'; channels: MumbleProxyChannelPayload[] }
-	| { type: 'UserList'; users: MumbleProxyUserPayload[] }
-	| { type: 'ChatMessage'; sender: string; message: string; channel_id: number }
+	| { type: 'answer'; data: { sdp: string } }
 	| {
-			type: 'UserStateChanged';
-			session_id: number;
-			channel_id: number;
-			muted: boolean;
-			deafened: boolean;
+			type: 'ice_candidate';
+			data: { candidate: string; sdp_mid: string | null; sdp_mline_index: number | null };
 	  }
-	| { type: 'Error'; message: string };
+	| { type: 'channel_updated'; data: { channels: MumbleProxyChannelPayload[] } }
+	| { type: 'user_joined'; data: MumbleProxyUserPayload }
+	| { type: 'user_left'; data: { session_id: number } }
+	| {
+			type: 'user_state';
+			data: {
+				session_id: number;
+				channel_id: number | null;
+				name: string | null;
+				mute: boolean | null;
+				deaf: boolean | null;
+				self_mute: boolean | null;
+				self_deaf: boolean | null;
+			};
+	  }
+	| {
+			type: 'chat_received';
+			data: {
+				sender_session: number;
+				sender_name: string;
+				message: string;
+				channel_id: number;
+				timestamp: number;
+			};
+	  }
+	| { type: 'error'; data: { message: string; code?: string } };
