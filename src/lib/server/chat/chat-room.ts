@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { ChatClientEvent, ChatMessage, ChatServerEvent } from '../../types';
+import type { ChatClientEvent, ChatMessage, ChatServerEvent, OnlineVisitor } from '../../types';
 import {
 	CHAT_MESSAGE_KEY_PREFIX,
 	CHAT_RATE_LIMIT_MAX_MESSAGES,
@@ -172,12 +172,7 @@ export class ChatRoom extends DurableObject<App.Platform['env']> {
 	}
 
 	private handleAdminOnline(): Response {
-		const visitors: Array<{
-			ip: string;
-			userAgent: string;
-			connectedAt: number;
-			nickname: string;
-		}> = [];
+		const visitors: OnlineVisitor[] = [];
 		for (const session of this.sessions.values()) {
 			visitors.push({
 				ip: session.ip,
