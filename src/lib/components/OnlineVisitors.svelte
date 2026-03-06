@@ -17,7 +17,11 @@
 		return { Authorization: `Bearer ${token}` };
 	}
 
+	let isFetching = false;
+
 	async function loadVisitors() {
+		if (isFetching) return;
+		isFetching = true;
 		if (visitors.length === 0) loading = true;
 		error = '';
 		try {
@@ -33,6 +37,7 @@
 			error = '网络错误';
 		} finally {
 			loading = false;
+			isFetching = false;
 		}
 	}
 
@@ -81,7 +86,7 @@
 
 	{#if visitors.length === 0 && !loading && !error}
 		<div class="empty-msg">🌸 暂无在线用户</div>
-	{:else}
+	{:else if visitors.length > 0}
 		<div class="table-wrap">
 			<table class="visitors-table">
 				<thead>
