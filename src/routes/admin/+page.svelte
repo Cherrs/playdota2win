@@ -281,7 +281,7 @@
 		{/if}
 
 		{#if adminTab === 'mumble'}
-			<MumbleStatusPanel token={adminToken} />
+			<MumbleStatusPanel />
 		{/if}
 	</div>
 {/if}

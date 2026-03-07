@@ -1,9 +1,9 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import type { ApiResponse, MumbleProxyConfig } from '$lib/types';
-import { getMumbleProxyConfig } from '$lib/server/mumble/config';
+import { getMumbleProxyConfig, getMumbleProxyHealthUrl } from '$lib/server/mumble/config';
 
-export const GET: RequestHandler = async ({ platform }) => {
-	const config = getMumbleProxyConfig(platform);
+export const GET: RequestHandler = async ({ platform, url }) => {
+	const config = getMumbleProxyConfig(platform, url);
 	if (!config) {
 		return json(
 			{
@@ -20,7 +20,7 @@ export const GET: RequestHandler = async ({ platform }) => {
 	return json(
 		{
 			success: true,
-			data: config
+			data: { ...config, healthUrl: getMumbleProxyHealthUrl(platform, url) }
 		} satisfies ApiResponse<MumbleProxyConfig>,
 		{
 			headers: { 'Cache-Control': 'no-store' }

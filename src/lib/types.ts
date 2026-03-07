@@ -176,11 +176,21 @@ export interface NicknameKeywordList {
 }
 
 /**
+ * WebRTC ICE 服务器配置
+ */
+export interface IceServer {
+	urls: string;
+	username?: string;
+	credential?: string;
+}
+
+/**
  * 浏览器可公开读取的 Mumble 代理配置
  */
 export interface MumbleProxyConfig {
 	wsUrl: string;
-	stunServers: string[];
+	iceServers: IceServer[];
+	healthUrl: string | null;
 }
 
 /**

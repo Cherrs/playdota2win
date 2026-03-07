@@ -9,6 +9,7 @@ import type {
 	MumbleTextMessage,
 	MumbleUser
 } from '$lib/types';
+import { dedupeChannels } from './utils.ts';
 
 export type MumbleClientMode = 'interactive' | 'monitor';
 export type MumbleAudioPermission = 'unknown' | 'granted' | 'denied' | 'unsupported';
@@ -37,6 +38,7 @@ export interface MumbleClientSnapshot {
 	voiceRequested: boolean;
 	voiceAvailable: boolean;
 	voiceConnected: boolean;
+	voiceFailed: boolean;
 	audioPermission: MumbleAudioPermission;
 	playbackBlocked: boolean;
 }
@@ -76,6 +78,7 @@ export function createInitialMumbleClientSnapshot(): MumbleClientSnapshot {
 		voiceRequested: false,
 		voiceAvailable: false,
 		voiceConnected: false,
+		voiceFailed: false,
 		audioPermission: 'unknown',
 		playbackBlocked: false
 	};
@@ -177,6 +180,7 @@ function getAudioPermission(error: unknown): MumbleAudioPermission {
 export function createMumbleClient(options: CreateMumbleClientOptions): {
 	state: Readable<MumbleClientSnapshot>;
 	connect: (connectOptions?: ConnectOptions) => void;
+	reconnect: (connectOptions?: ConnectOptions) => void;
 	disconnect: () => void;
 	destroy: () => void;
 	rename: (nickname: string) => void;
@@ -272,6 +276,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 		patch({
 			voiceConnected: false,
+			voiceFailed: false,
 			playbackBlocked: false,
 			voiceAvailable: localStream !== null
 		});
@@ -301,7 +306,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		}
 
 		const connection = new RTCPeerConnection({
-			iceServers: options.config.stunServers.map((url) => ({ urls: url }))
+			iceServers: options.config.iceServers
 		});
 		peerConnection = connection;
 
@@ -369,14 +374,18 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				connection.iceConnectionState === 'connected' ||
 				connection.iceConnectionState === 'completed'
 			) {
-				patch({ voiceConnected: true });
+				patch({ voiceConnected: true, voiceFailed: false });
+				return;
+			}
+
+			if (connection.iceConnectionState === 'failed') {
+				patch({ voiceConnected: false, voiceFailed: true });
 				return;
 			}
 
 			if (
 				connection.iceConnectionState === 'closed' ||
-				connection.iceConnectionState === 'disconnected' ||
-				connection.iceConnectionState === 'failed'
+				connection.iceConnectionState === 'disconnected'
 			) {
 				patch({ voiceConnected: false });
 			}
@@ -455,9 +464,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				status: 'disconnected',
 				reconnecting: false,
 				disconnectReason:
-					reconnectAttempts >= maxReconnectAttempts
-						? `${reason} (已达最大重连次数)`
-						: reason
+					reconnectAttempts >= maxReconnectAttempts ? `${reason} (已达最大重连次数)` : reason
 			});
 			return;
 		}
@@ -499,7 +506,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			case 'connected': {
 				reconnectAttempts = 0;
 				const normalizedUsers = parsed.data.users.map(normalizeUser);
-				const normalizedChannels = parsed.data.channels.map(normalizeChannel);
+				const normalizedChannels = dedupeChannels(parsed.data.channels.map(normalizeChannel));
 				const selfUser = normalizedUsers.find((u) => u.sessionId === parsed.data.session_id);
 				patch({
 					status: 'connected',
@@ -547,7 +554,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				});
 				return;
 			case 'channel_updated':
-				patch({ channels: parsed.data.channels.map(normalizeChannel) });
+				patch({ channels: dedupeChannels(parsed.data.channels.map(normalizeChannel)) });
 				return;
 			case 'user_joined':
 				updateUsers([...snapshot.users, normalizeUser(parsed.data)]);
@@ -606,8 +613,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 		shouldReconnect = true;
 		clearReconnectTimer();
-		pendingVoiceRequest =
-			(connectOptions?.requestVoice ?? mode === 'interactive') && mode === 'interactive';
+		pendingVoiceRequest = connectOptions?.requestVoice === true && mode === 'interactive';
 
 		patch({
 			status: reconnectAttempts > 0 ? 'reconnecting' : 'connecting',
@@ -641,6 +647,66 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 			handleSocketClose(event.reason || '与 Mumble 代理的连接已关闭');
 		};
+	}
+
+	function reconnect(connectOptions?: ConnectOptions): void {
+		if (destroyed) {
+			return;
+		}
+
+		shouldReconnect = true;
+		reconnectAttempts = 0;
+		clearReconnectTimer();
+		cleanupPeerConnection(false);
+		patch({
+			status: 'reconnecting',
+			reconnecting: true,
+			errorMessage: '',
+			disconnectReason: ''
+		});
+
+		const existingSocket = socket;
+		const nextConnectOptions = {
+			requestVoice:
+				connectOptions?.requestVoice ?? (mode === 'interactive' && snapshot.voiceRequested)
+		} satisfies ConnectOptions;
+
+		if (!existingSocket || existingSocket.readyState === WebSocket.CLOSED) {
+			socket = null;
+			connect(nextConnectOptions);
+			return;
+		}
+
+		existingSocket.onopen = null;
+		existingSocket.onmessage = null;
+		existingSocket.onerror = null;
+		existingSocket.onclose = () => {
+			if (socket !== existingSocket) {
+				return;
+			}
+
+			socket = null;
+			patch({
+				connected: false,
+				sessionId: null,
+				currentChannelId: null,
+				users: [],
+				onlineCount: 0
+			});
+			connect(nextConnectOptions);
+		};
+
+		if (existingSocket.readyState === SOCKET_OPEN) {
+			try {
+				existingSocket.send(
+					JSON.stringify({ type: 'disconnect' } satisfies MumbleProxyClientEvent)
+				);
+			} catch {
+				// Ignore close-time send failures.
+			}
+		}
+
+		existingSocket.close(1000, 'manual reconnect');
 	}
 
 	function resetSocketWithoutReconnect(reason: string): void {
@@ -744,6 +810,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	return {
 		state: { subscribe: store.subscribe },
 		connect,
+		reconnect,
 		disconnect,
 		destroy,
 		rename,

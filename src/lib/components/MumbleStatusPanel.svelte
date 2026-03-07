@@ -8,18 +8,13 @@
 	import { createChannelNameMap, countUsersByChannel } from '$lib/mumble/utils';
 	import type { ApiResponse, MumbleProxyConfig, MumbleProxyHealth } from '$lib/types';
 
-	interface Props {
-		token: string;
-	}
-
-	let { token }: Props = $props();
-
 	let loading = $state(true);
 	let configError = $state('');
 	let healthError = $state('');
 	let refreshingHealth = $state(false);
 	let clientState = $state<MumbleClientSnapshot>(createInitialMumbleClientSnapshot());
 	let proxyHealth = $state<MumbleProxyHealth | null>(null);
+	let healthUrl = $state<string | null>(null);
 
 	let client: ReturnType<typeof createMumbleClient> | null = null;
 	let unsubscribeClient: (() => void) | null = null;
@@ -52,6 +47,7 @@
 			const res = await fetch('/api/mumble/config');
 			const data: ApiResponse<MumbleProxyConfig> = await res.json();
 			if (data.success && data.data) {
+				healthUrl = data.data.healthUrl;
 				return data.data;
 			}
 			configError = data.error || 'Mumble 代理配置不可用';
@@ -62,28 +58,32 @@
 	}
 
 	async function refreshHealth(): Promise<void> {
+		if (!healthUrl) {
+			healthError = 'Mumble 代理健康检查地址尚未配置';
+			return;
+		}
 		refreshingHealth = true;
 		healthError = '';
+		const checkedAt = Date.now();
 		try {
-			const res = await fetch('/api/admin/mumble/health', {
-				headers: { Authorization: `Bearer ${token}` }
-			});
-			const data: ApiResponse<MumbleProxyHealth> = await res.json();
-			if (data.success && data.data) {
-				proxyHealth = data.data;
-			} else {
-				healthError = data.error || '获取代理健康状态失败';
-			}
+			const response = await fetch(healthUrl, { headers: { Accept: 'text/plain' } });
+			const message = (await response.text()).trim() || response.statusText || 'unknown';
+			proxyHealth = {
+				healthy: response.ok && message.toLowerCase() === 'ok',
+				status: response.status,
+				message,
+				checkedAt,
+				url: healthUrl
+			};
 		} catch {
-			healthError = '获取代理健康状态失败';
+			healthError = '获取代理健康状态失败（代理可能未运行）';
 		} finally {
 			refreshingHealth = false;
 		}
 	}
 
 	function handleReconnect(): void {
-		client?.disconnect();
-		client?.connect();
+		client?.reconnect();
 		void refreshHealth();
 	}
 

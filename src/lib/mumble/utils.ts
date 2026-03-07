@@ -10,6 +10,32 @@ function sortChannelsByName(a: MumbleChannel, b: MumbleChannel): number {
 	return a.name.localeCompare(b.name, 'zh-CN');
 }
 
+export function dedupeChannels(channels: MumbleChannel[]): MumbleChannel[] {
+	const channelIds: number[] = [];
+	const channelsById = new Map<number, MumbleChannel>();
+
+	for (const channel of channels) {
+		const existing = channelsById.get(channel.id);
+		if (!existing) {
+			channelIds.push(channel.id);
+			channelsById.set(channel.id, channel);
+			continue;
+		}
+
+		channelsById.set(channel.id, {
+			...existing,
+			name: existing.name || channel.name,
+			description: existing.description || channel.description,
+			parentId:
+				existing.parentId === existing.id && channel.parentId !== channel.id
+					? channel.parentId
+					: existing.parentId
+		});
+	}
+
+	return channelIds.map((channelId) => channelsById.get(channelId)!);
+}
+
 export function buildChannelOptions(channels: MumbleChannel[]): MumbleChannelOption[] {
 	if (channels.length === 0) {
 		return [];

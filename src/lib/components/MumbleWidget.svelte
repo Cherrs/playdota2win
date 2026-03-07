@@ -34,6 +34,8 @@
 	let newMsgPreview = $state<{ sender: string; message: string } | null>(null);
 	let showScrollToBottom = $state(false);
 	let newMsgIds = $state<Set<string>>(new Set());
+	let statusCollapsed = $state(false);
+	let channelCollapsed = $state(false);
 
 	let client: ReturnType<typeof createMumbleClient> | null = null;
 	let unsubscribeClient: (() => void) | null = null;
@@ -61,6 +63,9 @@
 		}
 		if (clientState.connected && clientState.voiceConnected) {
 			return '文字和语音已连接';
+		}
+		if (clientState.connected && clientState.voiceAvailable && clientState.voiceFailed) {
+			return '文字已连接，语音建立失败';
 		}
 		if (clientState.connected && clientState.voiceAvailable) {
 			return '文字已连接，正在建立语音...';
@@ -203,8 +208,7 @@
 	}
 
 	function handleReconnect(): void {
-		client?.disconnect();
-		client?.connect({ requestVoice: true });
+		client?.reconnect();
 	}
 
 	function handleMessageScroll(): void {
@@ -284,7 +288,7 @@
 				mode: 'interactive'
 			});
 			unsubscribeClient = client.state.subscribe(handleSnapshot);
-			client.connect({ requestVoice: true });
+			client.connect();
 		})();
 
 		return () => {
@@ -359,49 +363,77 @@
 			</div>
 
 			<div class="status-card">
-				<div class="status-main">
+				<button
+					class="card-header"
+					type="button"
+					onclick={() => (statusCollapsed = !statusCollapsed)}
+				>
 					<span class="status-dot" class:active={clientState.connected}></span>
-					<span>{statusText}</span>
-				</div>
-				{#if clientState.errorMessage}
-					<p class="status-error">{clientState.errorMessage}</p>
+					<span class="card-header-title">连接信息</span>
+					<span class="collapse-arrow" class:collapsed={statusCollapsed}>▾</span>
+				</button>
+				{#if !statusCollapsed}
+					<div class="card-body">
+						<div class="status-main">
+							<span>{statusText}</span>
+						</div>
+						{#if clientState.errorMessage}
+							<p class="status-error">{clientState.errorMessage}</p>
+						{/if}
+					</div>
 				{/if}
 			</div>
 
 			<div class="channel-card">
-				<label class="section-label" for="mumble-channel-select">当前频道</label>
-				<select
-					id="mumble-channel-select"
-					class="channel-select"
-					value={clientState.currentChannelId ?? ''}
-					disabled={!clientState.connected || channelOptions.length === 0}
-					onchange={(event) => {
-						const value = Number((event.currentTarget as HTMLSelectElement).value);
-						if (!Number.isNaN(value)) {
-							client?.switchChannel(value);
-						}
-					}}
+				<button
+					class="card-header"
+					type="button"
+					onclick={() => (channelCollapsed = !channelCollapsed)}
 				>
-					{#if channelOptions.length === 0}
-						<option value="">等待频道列表...</option>
-					{:else}
-						{#each channelOptions as option (option.id)}
-							<option value={option.id}>{option.label}</option>
-						{/each}
+					<span class="card-header-title">当前频道</span>
+					{#if channelCollapsed}
+						<span class="channel-name-pill">
+							{channelOptions.find((o) => o.id === clientState.currentChannelId)?.label ?? '—'}
+						</span>
 					{/if}
-				</select>
+					<span class="collapse-arrow" class:collapsed={channelCollapsed}>▾</span>
+				</button>
+				{#if !channelCollapsed}
+					<div class="card-body">
+						<select
+							id="mumble-channel-select"
+							class="channel-select"
+							value={clientState.currentChannelId ?? ''}
+							disabled={!clientState.connected || channelOptions.length === 0}
+							onchange={(event) => {
+								const value = Number((event.currentTarget as HTMLSelectElement).value);
+								if (!Number.isNaN(value)) {
+									client?.switchChannel(value);
+								}
+							}}
+						>
+							{#if channelOptions.length === 0}
+								<option value="">等待频道列表...</option>
+							{:else}
+								{#each channelOptions as option (option.id)}
+									<option value={option.id}>{option.label}</option>
+								{/each}
+							{/if}
+						</select>
 
-				<div class="user-chips">
-					{#if currentChannelUsers.length === 0}
-						<span class="hint-chip">当前频道暂无成员</span>
-					{:else}
-						{#each currentChannelUsers as user (`${user.sessionId}-${user.name}`)}
-							<span class="user-chip" class:self={user.sessionId === clientState.sessionId}>
-								{user.name}
-							</span>
-						{/each}
-					{/if}
-				</div>
+						<div class="user-chips">
+							{#if currentChannelUsers.length === 0}
+								<span class="hint-chip">当前频道暂无成员</span>
+							{:else}
+								{#each currentChannelUsers as user (`${user.sessionId}-${user.name}`)}
+									<span class="user-chip" class:self={user.sessionId === clientState.sessionId}>
+										{user.name}
+									</span>
+								{/each}
+							{/if}
+						</div>
+					</div>
+				{/if}
 			</div>
 
 			<div class="voice-controls">
@@ -739,12 +771,51 @@
 		color: #8a5686;
 	}
 
-	.section-label {
-		display: block;
-		margin-bottom: 0.45rem;
+	.card-header {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		width: 100%;
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 0;
+		text-align: left;
+		color: #6b4c9a;
+	}
+
+	.card-header-title {
+		flex: 1;
 		font-size: 0.78rem;
 		font-weight: 700;
 		color: #6b4c9a;
+	}
+
+	.channel-name-pill {
+		font-size: 0.75rem;
+		color: #7d5ca8;
+		background: rgba(255, 255, 255, 0.55);
+		padding: 0.1rem 0.45rem;
+		border-radius: 999px;
+		max-width: 120px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.collapse-arrow {
+		font-size: 0.85rem;
+		color: #9787b8;
+		transition: transform 0.2s ease;
+		line-height: 1;
+	}
+
+	.collapse-arrow.collapsed {
+		transform: rotate(-90deg);
+	}
+
+	.card-body {
+		margin-top: 0.5rem;
 	}
 
 	.user-chips {
