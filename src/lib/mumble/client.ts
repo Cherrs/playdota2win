@@ -222,6 +222,8 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			? (users.find((user) => user.sessionId === snapshot.sessionId) ?? null)
 			: null;
 
+		// Intentionally split authority: snapshot.muted/deafened drive the local controls, while
+		// users[] (including self) remains the last server-reported roster state for rendering.
 		patch({
 			users,
 			onlineCount: users.length,
