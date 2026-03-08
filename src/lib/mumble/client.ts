@@ -294,21 +294,31 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		});
 	}
 
-	function applyLocalVoiceIntent(): void {
+	function applyMutedIntent(): void {
 		if (localStream) {
 			for (const track of localStream.getAudioTracks()) {
 				track.enabled = !snapshot.muted;
 			}
 		}
 
+		if (socket?.readyState === SOCKET_OPEN) {
+			sendEvent({ type: 'mute', data: { muted: snapshot.muted } });
+		}
+	}
+
+	function applyDeafenedIntent(): void {
 		for (const audio of remoteAudioElements.values()) {
 			audio.muted = snapshot.deafened;
 		}
 
 		if (socket?.readyState === SOCKET_OPEN) {
-			sendEvent({ type: 'mute', data: { muted: snapshot.muted } });
 			sendEvent({ type: 'deafen', data: { deafened: snapshot.deafened } });
 		}
+	}
+
+	function applyLocalVoiceIntent(): void {
+		applyMutedIntent();
+		applyDeafenedIntent();
 	}
 
 	async function ensurePeerConnection(): Promise<void> {
@@ -813,12 +823,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 	function setMuted(muted: boolean): void {
 		patch({ muted });
-		applyLocalVoiceIntent();
+		applyMutedIntent();
 	}
 
 	function setDeafened(deafened: boolean): void {
 		patch({ deafened });
-		applyLocalVoiceIntent();
+		applyDeafenedIntent();
 
 		if (!deafened) {
 			void resumeAudioPlayback();
