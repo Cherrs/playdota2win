@@ -128,9 +128,33 @@ class FakeWebSocket {
 	}
 }
 
+type SentClientEvent = {
+	type: string;
+	data?: Record<string, unknown>;
+};
+
 async function flushAsyncWork(): Promise<void> {
 	await new Promise((resolve) => setImmediate(resolve));
 	await new Promise((resolve) => setImmediate(resolve));
+}
+
+function parseSentEvents(socket: FakeWebSocket): SentClientEvent[] {
+	return socket.sent.map((payload) => JSON.parse(payload) as SentClientEvent);
+}
+
+function assertReplayedVoiceIntent(
+	socket: FakeWebSocket,
+	expected: { muted: boolean; deafened: boolean }
+): void {
+	const sentEvents = parseSentEvents(socket);
+	assert.deepEqual(sentEvents.filter((event) => event.type === 'mute').at(-1), {
+		type: 'mute',
+		data: { muted: expected.muted }
+	});
+	assert.deepEqual(sentEvents.filter((event) => event.type === 'deafen').at(-1), {
+		type: 'deafen',
+		data: { deafened: expected.deafened }
+	});
 }
 
 test('interactive connect auto-requests voice and starts muted by default', async () => {
@@ -459,14 +483,7 @@ test('reconnect preserves local mute and text-only intent', async () => {
 		assert.equal(track.enabled, true);
 		assert.equal(lastSnapshot?.muted, false);
 		assert.equal(lastSnapshot?.deafened, true);
-		assert.equal(
-			secondSocket.sent.some((payload) => /"type":"mute"/.test(payload)),
-			true
-		);
-		assert.equal(
-			secondSocket.sent.some((payload) => /"type":"deafen"/.test(payload)),
-			true
-		);
+		assertReplayedVoiceIntent(secondSocket, { muted: false, deafened: true });
 
 		unsubscribe();
 		client.destroy();
@@ -621,14 +638,7 @@ test('auto reconnect preserves local mute and text-only intent', async () => {
 		assert.equal(track.enabled, true);
 		assert.equal(lastSnapshot?.muted, false);
 		assert.equal(lastSnapshot?.deafened, true);
-		assert.equal(
-			secondSocket.sent.some((payload) => /"type":"mute"/.test(payload)),
-			true
-		);
-		assert.equal(
-			secondSocket.sent.some((payload) => /"type":"deafen"/.test(payload)),
-			true
-		);
+		assertReplayedVoiceIntent(secondSocket, { muted: false, deafened: true });
 
 		unsubscribe();
 		client.destroy();
