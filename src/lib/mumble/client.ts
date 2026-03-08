@@ -294,6 +294,23 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		});
 	}
 
+	function applyLocalVoiceIntent(): void {
+		if (localStream) {
+			for (const track of localStream.getAudioTracks()) {
+				track.enabled = !snapshot.muted;
+			}
+		}
+
+		for (const audio of remoteAudioElements.values()) {
+			audio.muted = snapshot.deafened;
+		}
+
+		if (socket?.readyState === SOCKET_OPEN) {
+			sendEvent({ type: 'mute', data: { muted: snapshot.muted } });
+			sendEvent({ type: 'deafen', data: { deafened: snapshot.deafened } });
+		}
+	}
+
 	async function ensurePeerConnection(): Promise<void> {
 		if (
 			mode !== 'interactive' ||
@@ -438,15 +455,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			}
 		}
 
-		for (const track of localStream.getAudioTracks()) {
-			track.enabled = !snapshot.muted;
-		}
-
 		patch({
 			voiceAvailable: true,
 			audioPermission: 'granted',
 			errorMessage: ''
 		});
+		applyLocalVoiceIntent();
 
 		if (snapshot.connected) {
 			await ensurePeerConnection();
@@ -529,6 +543,9 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 					await ensureVoice();
 				} else if (mode === 'interactive' && localStream && snapshot.voiceRequested) {
 					await ensurePeerConnection();
+				}
+				if (mode === 'interactive') {
+					applyLocalVoiceIntent();
 				}
 				return;
 			}
@@ -795,23 +812,13 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	}
 
 	function setMuted(muted: boolean): void {
-		if (localStream) {
-			for (const track of localStream.getAudioTracks()) {
-				track.enabled = !muted;
-			}
-		}
-
 		patch({ muted });
-		sendEvent({ type: 'mute', data: { muted } });
+		applyLocalVoiceIntent();
 	}
 
 	function setDeafened(deafened: boolean): void {
-		for (const audio of remoteAudioElements.values()) {
-			audio.muted = deafened;
-		}
-
 		patch({ deafened });
-		sendEvent({ type: 'deafen', data: { deafened } });
+		applyLocalVoiceIntent();
 
 		if (!deafened) {
 			void resumeAudioPlayback();

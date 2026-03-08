@@ -361,6 +361,309 @@ test('reconnect waits for the previous socket to close before opening a new sess
 	}
 });
 
+test('reconnect preserves local mute and text-only intent', async () => {
+	const originalWebSocket = globalThis.WebSocket;
+	const originalRTCPeerConnection = globalThis.RTCPeerConnection;
+	const originalRTCRtpReceiver = globalThis.RTCRtpReceiver;
+	const originalAudio = globalThis.Audio;
+	const originalNavigator = globalThis.navigator;
+
+	FakeWebSocket.instances = [];
+	FakeRTCPeerConnection.instances = [];
+
+	const track = new FakeMediaStreamTrack();
+	const localStream = new FakeMediaStream([track]);
+	const connectedPayload = {
+		type: 'connected' as const,
+		data: {
+			session_id: 1,
+			channels: [{ id: 0, name: 'Root', parent_id: 0, description: '' }],
+			users: [
+				{
+					session_id: 1,
+					name: 'TestUser',
+					channel_id: 0,
+					mute: false,
+					deaf: false,
+					self_mute: false,
+					self_deaf: false
+				}
+			]
+		}
+	};
+
+	Object.defineProperty(globalThis, 'WebSocket', {
+		configurable: true,
+		value: FakeWebSocket
+	});
+	Object.defineProperty(globalThis, 'RTCPeerConnection', {
+		configurable: true,
+		value: FakeRTCPeerConnection
+	});
+	Object.defineProperty(globalThis, 'RTCRtpReceiver', {
+		configurable: true,
+		value: {
+			getCapabilities: () => ({
+				codecs: [{ mimeType: 'audio/opus' }]
+			})
+		}
+	});
+	Object.defineProperty(globalThis, 'Audio', {
+		configurable: true,
+		value: FakeAudio
+	});
+	Object.defineProperty(globalThis, 'navigator', {
+		configurable: true,
+		value: {
+			mediaDevices: {
+				getUserMedia: async () => localStream
+			}
+		}
+	});
+
+	try {
+		const client = createMumbleClient({
+			config: {
+				wsUrl: 'ws://127.0.0.1:8080/ws',
+				iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+				healthUrl: null
+			},
+			nickname: 'TestUser',
+			mode: 'interactive'
+		});
+		const snapshots: MumbleClientSnapshot[] = [];
+		const unsubscribe = client.state.subscribe((value) => snapshots.push(value));
+
+		client.connect();
+		assert.equal(FakeWebSocket.instances.length, 1);
+
+		const firstSocket = FakeWebSocket.instances[0];
+		firstSocket.open();
+		firstSocket.receive(connectedPayload);
+		await flushAsyncWork();
+
+		client.setMuted(false);
+		client.setDeafened(true);
+		client.reconnect();
+		firstSocket.completeClose('manual reconnect');
+		await flushAsyncWork();
+
+		assert.equal(FakeWebSocket.instances.length, 2);
+
+		const secondSocket = FakeWebSocket.instances[1];
+		secondSocket.open();
+		secondSocket.receive(connectedPayload);
+		await flushAsyncWork();
+
+		const lastSnapshot = snapshots.at(-1);
+		assert.equal(track.enabled, true);
+		assert.equal(lastSnapshot?.muted, false);
+		assert.equal(lastSnapshot?.deafened, true);
+		assert.equal(
+			secondSocket.sent.some((payload) => /"type":"mute"/.test(payload)),
+			true
+		);
+		assert.equal(
+			secondSocket.sent.some((payload) => /"type":"deafen"/.test(payload)),
+			true
+		);
+
+		unsubscribe();
+		client.destroy();
+	} finally {
+		Object.defineProperty(globalThis, 'WebSocket', {
+			configurable: true,
+			value: originalWebSocket
+		});
+		Object.defineProperty(globalThis, 'RTCPeerConnection', {
+			configurable: true,
+			value: originalRTCPeerConnection
+		});
+		Object.defineProperty(globalThis, 'RTCRtpReceiver', {
+			configurable: true,
+			value: originalRTCRtpReceiver
+		});
+		Object.defineProperty(globalThis, 'Audio', {
+			configurable: true,
+			value: originalAudio
+		});
+		Object.defineProperty(globalThis, 'navigator', {
+			configurable: true,
+			value: originalNavigator
+		});
+	}
+});
+
+test('auto reconnect preserves local mute and text-only intent', async () => {
+	const originalWebSocket = globalThis.WebSocket;
+	const originalRTCPeerConnection = globalThis.RTCPeerConnection;
+	const originalRTCRtpReceiver = globalThis.RTCRtpReceiver;
+	const originalAudio = globalThis.Audio;
+	const originalNavigator = globalThis.navigator;
+	const originalSetTimeout = globalThis.setTimeout;
+	const originalClearTimeout = globalThis.clearTimeout;
+
+	FakeWebSocket.instances = [];
+	FakeRTCPeerConnection.instances = [];
+
+	const track = new FakeMediaStreamTrack();
+	const localStream = new FakeMediaStream([track]);
+	const connectedPayload = {
+		type: 'connected' as const,
+		data: {
+			session_id: 1,
+			channels: [{ id: 0, name: 'Root', parent_id: 0, description: '' }],
+			users: [
+				{
+					session_id: 1,
+					name: 'TestUser',
+					channel_id: 0,
+					mute: false,
+					deaf: false,
+					self_mute: false,
+					self_deaf: false
+				}
+			]
+		}
+	};
+	let nextTimerId = 0;
+	const pendingTimers = new Map<number, () => void>();
+
+	Object.defineProperty(globalThis, 'WebSocket', {
+		configurable: true,
+		value: FakeWebSocket
+	});
+	Object.defineProperty(globalThis, 'RTCPeerConnection', {
+		configurable: true,
+		value: FakeRTCPeerConnection
+	});
+	Object.defineProperty(globalThis, 'RTCRtpReceiver', {
+		configurable: true,
+		value: {
+			getCapabilities: () => ({
+				codecs: [{ mimeType: 'audio/opus' }]
+			})
+		}
+	});
+	Object.defineProperty(globalThis, 'Audio', {
+		configurable: true,
+		value: FakeAudio
+	});
+	Object.defineProperty(globalThis, 'navigator', {
+		configurable: true,
+		value: {
+			mediaDevices: {
+				getUserMedia: async () => localStream
+			}
+		}
+	});
+	Object.defineProperty(globalThis, 'setTimeout', {
+		configurable: true,
+		value: ((callback: () => void) => {
+			const timerId = ++nextTimerId;
+			pendingTimers.set(timerId, callback);
+			queueMicrotask(() => {
+				const pending = pendingTimers.get(timerId);
+				if (pending) {
+					pendingTimers.delete(timerId);
+					pending();
+				}
+			});
+			return timerId as unknown as ReturnType<typeof setTimeout>;
+		}) as typeof setTimeout
+	});
+	Object.defineProperty(globalThis, 'clearTimeout', {
+		configurable: true,
+		value: ((timerId: ReturnType<typeof setTimeout>) => {
+			pendingTimers.delete(Number(timerId));
+		}) as typeof clearTimeout
+	});
+
+	try {
+		const client = createMumbleClient({
+			config: {
+				wsUrl: 'ws://127.0.0.1:8080/ws',
+				iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+				healthUrl: null
+			},
+			nickname: 'TestUser',
+			mode: 'interactive'
+		});
+		const snapshots: MumbleClientSnapshot[] = [];
+		const unsubscribe = client.state.subscribe((value) => snapshots.push(value));
+
+		client.connect();
+		assert.equal(FakeWebSocket.instances.length, 1);
+
+		const firstSocket = FakeWebSocket.instances[0];
+		firstSocket.open();
+		firstSocket.receive(connectedPayload);
+		await flushAsyncWork();
+
+		client.setMuted(false);
+		client.setDeafened(true);
+		firstSocket.completeClose('proxy reset');
+		await flushAsyncWork();
+
+		assert.equal(FakeWebSocket.instances.length, 2);
+
+		const reconnectSnapshot = snapshots.at(-1);
+		assert.equal(reconnectSnapshot?.status, 'reconnecting');
+		assert.equal(reconnectSnapshot?.muted, false);
+		assert.equal(reconnectSnapshot?.deafened, true);
+
+		const secondSocket = FakeWebSocket.instances[1];
+		secondSocket.open();
+		secondSocket.receive(connectedPayload);
+		await flushAsyncWork();
+
+		const lastSnapshot = snapshots.at(-1);
+		assert.equal(track.enabled, true);
+		assert.equal(lastSnapshot?.muted, false);
+		assert.equal(lastSnapshot?.deafened, true);
+		assert.equal(
+			secondSocket.sent.some((payload) => /"type":"mute"/.test(payload)),
+			true
+		);
+		assert.equal(
+			secondSocket.sent.some((payload) => /"type":"deafen"/.test(payload)),
+			true
+		);
+
+		unsubscribe();
+		client.destroy();
+	} finally {
+		Object.defineProperty(globalThis, 'WebSocket', {
+			configurable: true,
+			value: originalWebSocket
+		});
+		Object.defineProperty(globalThis, 'RTCPeerConnection', {
+			configurable: true,
+			value: originalRTCPeerConnection
+		});
+		Object.defineProperty(globalThis, 'RTCRtpReceiver', {
+			configurable: true,
+			value: originalRTCRtpReceiver
+		});
+		Object.defineProperty(globalThis, 'Audio', {
+			configurable: true,
+			value: originalAudio
+		});
+		Object.defineProperty(globalThis, 'navigator', {
+			configurable: true,
+			value: originalNavigator
+		});
+		Object.defineProperty(globalThis, 'setTimeout', {
+			configurable: true,
+			value: originalSetTimeout
+		});
+		Object.defineProperty(globalThis, 'clearTimeout', {
+			configurable: true,
+			value: originalClearTimeout
+		});
+	}
+});
+
 test('local mute and deafen are not overwritten by self user_state events', async () => {
 	const originalWebSocket = globalThis.WebSocket;
 	const originalRTCPeerConnection = globalThis.RTCPeerConnection;
