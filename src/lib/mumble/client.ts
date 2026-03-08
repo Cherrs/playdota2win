@@ -73,9 +73,9 @@ export function createInitialMumbleClientSnapshot(): MumbleClientSnapshot {
 		users: [],
 		messages: [],
 		onlineCount: 0,
-		muted: false,
+		muted: true,
 		deafened: false,
-		voiceRequested: false,
+		voiceRequested: true,
 		voiceAvailable: false,
 		voiceConnected: false,
 		voiceFailed: false,
@@ -524,7 +524,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				if (mode === 'monitor') {
 					sendEvent({ type: 'deafen', data: { deafened: true } });
 					patch({ deafened: true });
-				} else if (pendingVoiceRequest) {
+				} else if (mode === 'interactive' && pendingVoiceRequest) {
 					pendingVoiceRequest = false;
 					await ensureVoice();
 				} else if (localStream) {
@@ -613,7 +613,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 		shouldReconnect = true;
 		clearReconnectTimer();
-		pendingVoiceRequest = connectOptions?.requestVoice === true && mode === 'interactive';
+		const requestedVoice =
+			mode === 'interactive' && (connectOptions?.requestVoice ?? snapshot.voiceRequested);
+		if (mode === 'interactive' && connectOptions?.requestVoice !== undefined) {
+			patch({ voiceRequested: requestedVoice });
+		}
+		pendingVoiceRequest = requestedVoice;
 
 		patch({
 			status: reconnectAttempts > 0 ? 'reconnecting' : 'connecting',
