@@ -527,7 +527,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				} else if (mode === 'interactive' && pendingVoiceRequest) {
 					pendingVoiceRequest = false;
 					await ensureVoice();
-				} else if (localStream) {
+				} else if (mode === 'interactive' && localStream && snapshot.voiceRequested) {
 					await ensurePeerConnection();
 				}
 				return;
