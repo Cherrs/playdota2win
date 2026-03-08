@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { get } from 'svelte/store';
 
 import { createMumbleClient } from './client.ts';
 
@@ -585,12 +586,16 @@ test('explicit voice opt-out does not recreate voice on warmed reconnect', async
 
 		assert.equal(getUserMediaCalls, 1);
 		assert.equal(FakeRTCPeerConnection.instances.length, 1);
+		assert.equal(track.stopCalls, 0);
 
 		client.reconnect({ requestVoice: false });
 		firstSocket.completeClose('manual reconnect');
 		await flushAsyncWork();
 
 		assert.equal(FakeWebSocket.instances.length, 2);
+		assert.equal(track.stopCalls, 1);
+		assert.equal(get(client.state).voiceRequested, false);
+		assert.equal(get(client.state).voiceAvailable, false);
 
 		const secondSocket = FakeWebSocket.instances[1];
 		secondSocket.open();
@@ -616,6 +621,9 @@ test('explicit voice opt-out does not recreate voice on warmed reconnect', async
 
 		assert.equal(getUserMediaCalls, 1);
 		assert.equal(FakeRTCPeerConnection.instances.length, 1);
+		assert.equal(track.stopCalls, 1);
+		assert.equal(get(client.state).voiceRequested, false);
+		assert.equal(get(client.state).voiceAvailable, false);
 
 		client.destroy();
 	} finally {

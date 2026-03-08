@@ -659,10 +659,17 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			return;
 		}
 
+		const requestedVoice =
+			connectOptions?.requestVoice ?? (mode === 'interactive' && snapshot.voiceRequested);
+		const stopLocalStream = mode === 'interactive' && connectOptions?.requestVoice === false;
+
 		shouldReconnect = true;
 		reconnectAttempts = 0;
 		clearReconnectTimer();
-		cleanupPeerConnection(false);
+		cleanupPeerConnection(stopLocalStream);
+		if (mode === 'interactive' && connectOptions?.requestVoice !== undefined) {
+			patch({ voiceRequested: requestedVoice });
+		}
 		patch({
 			status: 'reconnecting',
 			reconnecting: true,
@@ -672,8 +679,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 		const existingSocket = socket;
 		const nextConnectOptions = {
-			requestVoice:
-				connectOptions?.requestVoice ?? (mode === 'interactive' && snapshot.voiceRequested)
+			requestVoice: requestedVoice
 		} satisfies ConnectOptions;
 
 		if (!existingSocket || existingSocket.readyState === WebSocket.CLOSED) {
