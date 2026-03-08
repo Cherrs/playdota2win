@@ -443,17 +443,17 @@ test('local mute and deafen are not overwritten by self user_state events', asyn
 
 		client.setMuted(false);
 		client.setDeafened(true);
- 		socket.receive({
- 			type: 'user_state',
- 			data: {
- 				session_id: 1,
+		socket.receive({
+			type: 'user_state',
+			data: {
+				session_id: 1,
 				mute: true,
 				deaf: false,
 				self_mute: true,
- 				self_deaf: false
- 			}
- 		});
- 
+				self_deaf: false
+			}
+		});
+
 		const lastSnapshot = snapshots.at(-1);
 		assert.equal(lastSnapshot?.muted, false);
 		assert.equal(lastSnapshot?.deafened, true);
