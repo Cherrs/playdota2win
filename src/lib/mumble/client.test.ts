@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { get } from 'svelte/store';
 
-import { createMumbleClient } from './client.ts';
+import { createMumbleClient, type MumbleClientSnapshot } from './client.ts';
 
 class FakeAudio {
 	srcObject: MediaStream | null = null;
@@ -336,6 +336,128 @@ test('reconnect waits for the previous socket to close before opening a new sess
 		assert.equal(FakeWebSocket.instances.length, 2);
 		assert.equal(FakeWebSocket.instances[1].url, 'ws://127.0.0.1:8080/ws');
 
+		client.destroy();
+	} finally {
+		Object.defineProperty(globalThis, 'WebSocket', {
+			configurable: true,
+			value: originalWebSocket
+		});
+		Object.defineProperty(globalThis, 'RTCPeerConnection', {
+			configurable: true,
+			value: originalRTCPeerConnection
+		});
+		Object.defineProperty(globalThis, 'RTCRtpReceiver', {
+			configurable: true,
+			value: originalRTCRtpReceiver
+		});
+		Object.defineProperty(globalThis, 'Audio', {
+			configurable: true,
+			value: originalAudio
+		});
+		Object.defineProperty(globalThis, 'navigator', {
+			configurable: true,
+			value: originalNavigator
+		});
+	}
+});
+
+test('local mute and deafen are not overwritten by self user_state events', async () => {
+	const originalWebSocket = globalThis.WebSocket;
+	const originalRTCPeerConnection = globalThis.RTCPeerConnection;
+	const originalRTCRtpReceiver = globalThis.RTCRtpReceiver;
+	const originalAudio = globalThis.Audio;
+	const originalNavigator = globalThis.navigator;
+
+	FakeWebSocket.instances = [];
+	FakeRTCPeerConnection.instances = [];
+
+	const track = new FakeMediaStreamTrack();
+	const localStream = new FakeMediaStream([track]);
+
+	Object.defineProperty(globalThis, 'WebSocket', {
+		configurable: true,
+		value: FakeWebSocket
+	});
+	Object.defineProperty(globalThis, 'RTCPeerConnection', {
+		configurable: true,
+		value: FakeRTCPeerConnection
+	});
+	Object.defineProperty(globalThis, 'RTCRtpReceiver', {
+		configurable: true,
+		value: {
+			getCapabilities: () => ({
+				codecs: [{ mimeType: 'audio/opus' }]
+			})
+		}
+	});
+	Object.defineProperty(globalThis, 'Audio', {
+		configurable: true,
+		value: FakeAudio
+	});
+	Object.defineProperty(globalThis, 'navigator', {
+		configurable: true,
+		value: {
+			mediaDevices: {
+				getUserMedia: async () => localStream
+			}
+		}
+	});
+
+	try {
+		const client = createMumbleClient({
+			config: {
+				wsUrl: 'ws://127.0.0.1:8080/ws',
+				iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+				healthUrl: null
+			},
+			nickname: 'TestUser',
+			mode: 'interactive'
+		});
+		const snapshots: MumbleClientSnapshot[] = [];
+		const unsubscribe = client.state.subscribe((value) => snapshots.push(value));
+
+		client.connect();
+		assert.equal(FakeWebSocket.instances.length, 1);
+
+		const socket = FakeWebSocket.instances[0];
+		socket.open();
+		socket.receive({
+			type: 'connected',
+			data: {
+				session_id: 1,
+				channels: [{ id: 0, name: 'Root', parent_id: 0, description: '' }],
+				users: [
+					{
+						session_id: 1,
+						name: 'TestUser',
+						channel_id: 0,
+						mute: false,
+						deaf: false,
+						self_mute: false,
+						self_deaf: false
+					}
+				]
+			}
+		});
+		await flushAsyncWork();
+
+		client.setMuted(false);
+		client.setDeafened(true);
+		socket.receive({
+			type: 'user_state',
+			data: {
+				session_id: 1,
+				mute: true,
+				deaf: false,
+				self_mute: true,
+				self_deaf: false
+			}
+		});
+
+		assert.equal(snapshots.at(-1)?.muted, false);
+		assert.equal(snapshots.at(-1)?.deafened, true);
+
+		unsubscribe();
 		client.destroy();
 	} finally {
 		Object.defineProperty(globalThis, 'WebSocket', {

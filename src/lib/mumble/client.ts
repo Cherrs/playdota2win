@@ -225,9 +225,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		patch({
 			users,
 			onlineCount: users.length,
-			currentChannelId: self?.channelId ?? snapshot.currentChannelId,
-			muted: self?.muted ?? snapshot.muted,
-			deafened: self?.deafened ?? snapshot.deafened
+			currentChannelId: self?.channelId ?? snapshot.currentChannelId
 		});
 	}
 
@@ -577,16 +575,19 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				return;
 			}
 			case 'user_state': {
+				const isSelf = parsed.data.session_id === snapshot.sessionId;
 				const nextUsers = snapshot.users.map((user) =>
 					user.sessionId === parsed.data.session_id
 						? {
 								...user,
 								...(parsed.data.channel_id != null && { channelId: parsed.data.channel_id }),
 								...(parsed.data.name != null && { name: sanitizeString(parsed.data.name, 32) }),
-								...(parsed.data.mute != null && { muted: parsed.data.mute }),
-								...(parsed.data.deaf != null && { deafened: parsed.data.deaf }),
-								...(parsed.data.self_mute != null && { selfMuted: parsed.data.self_mute }),
-								...(parsed.data.self_deaf != null && { selfDeafened: parsed.data.self_deaf })
+								...(!isSelf && parsed.data.mute != null && { muted: parsed.data.mute }),
+								...(!isSelf && parsed.data.deaf != null && { deafened: parsed.data.deaf }),
+								...(!isSelf &&
+									parsed.data.self_mute != null && { selfMuted: parsed.data.self_mute }),
+								...(!isSelf &&
+									parsed.data.self_deaf != null && { selfDeafened: parsed.data.self_deaf })
 							}
 						: user
 				);
