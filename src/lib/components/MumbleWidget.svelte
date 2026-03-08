@@ -88,6 +88,7 @@
 		if (
 			clientState.connected &&
 			clientState.voiceAvailable &&
+			clientState.voiceRequested &&
 			!clientState.voiceConnected &&
 			!clientState.voiceFailed
 		) {
