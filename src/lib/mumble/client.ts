@@ -541,10 +541,10 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				} else if (mode === 'interactive' && pendingVoiceRequest) {
 					pendingVoiceRequest = false;
 					await ensureVoice();
-				} else if (mode === 'interactive' && localStream && snapshot.voiceRequested) {
-					await ensurePeerConnection();
-				}
-				if (mode === 'interactive') {
+				} else if (mode === 'interactive') {
+					if (localStream && snapshot.voiceRequested) {
+						await ensurePeerConnection();
+					}
 					applyLocalVoiceIntent();
 				}
 				return;

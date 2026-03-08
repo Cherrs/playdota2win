@@ -147,14 +147,11 @@ function assertReplayedVoiceIntent(
 	expected: { muted: boolean; deafened: boolean }
 ): void {
 	const sentEvents = parseSentEvents(socket);
-	assert.deepEqual(sentEvents.filter((event) => event.type === 'mute').at(-1), {
-		type: 'mute',
-		data: { muted: expected.muted }
-	});
-	assert.deepEqual(sentEvents.filter((event) => event.type === 'deafen').at(-1), {
-		type: 'deafen',
-		data: { deafened: expected.deafened }
-	});
+	const muteEvents = sentEvents.filter((event) => event.type === 'mute');
+	const deafenEvents = sentEvents.filter((event) => event.type === 'deafen');
+
+	assert.deepEqual(muteEvents, [{ type: 'mute', data: { muted: expected.muted } }]);
+	assert.deepEqual(deafenEvents, [{ type: 'deafen', data: { deafened: expected.deafened } }]);
 }
 
 test('interactive connect auto-requests voice and starts muted by default', async () => {
