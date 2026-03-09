@@ -61,8 +61,11 @@
 		if (clientState.status === 'connecting') {
 			return '正在连接 Mumble...';
 		}
+		if (clientState.connected && clientState.voiceConnected && clientState.muted) {
+			return '文字和语音已连接，当前未开麦';
+		}
 		if (clientState.connected && clientState.voiceConnected) {
-			return '文字和语音已连接';
+			return '文字和语音已连接，可以开始说话';
 		}
 		if (clientState.connected && clientState.voiceAvailable && clientState.voiceFailed) {
 			return '文字已连接，语音建立失败';
@@ -77,6 +80,27 @@
 			return clientState.disconnectReason;
 		}
 		return '未连接';
+	});
+	const mutedHintText = $derived.by(() => {
+		if (clientState.voiceConnected && clientState.muted) {
+			return '已自动加入语音，当前默认静音；想发言时点“取消静音”即可开麦。';
+		}
+		if (
+			clientState.connected &&
+			clientState.voiceAvailable &&
+			clientState.voiceRequested &&
+			!clientState.voiceConnected &&
+			!clientState.voiceFailed
+		) {
+			return '正在自动请求语音通道，连接完成后会保持默认静音。';
+		}
+		return '';
+	});
+	const voiceButtonLabel = $derived.by(() => {
+		if (clientState.voiceConnected) {
+			return clientState.muted ? '语音已连接（未开麦）' : '语音已启用';
+		}
+		return '重新请求语音';
 	});
 
 	async function fetchNicknameKeywords(): Promise<string[]> {
@@ -377,6 +401,9 @@
 						<div class="status-main">
 							<span>{statusText}</span>
 						</div>
+						{#if mutedHintText}
+							<p class="status-note">{mutedHintText}</p>
+						{/if}
 						{#if clientState.errorMessage}
 							<p class="status-error">{clientState.errorMessage}</p>
 						{/if}
@@ -444,7 +471,7 @@
 					onclick={() => void client?.ensureVoice()}
 					disabled={loadingConfig || !!configError}
 				>
-					{clientState.voiceConnected ? '语音已启用' : '启用语音'}
+					{voiceButtonLabel}
 				</button>
 				<button
 					class="voice-btn ghost"
@@ -769,6 +796,15 @@
 		margin: 0.45rem 0 0;
 		font-size: 0.78rem;
 		color: #8a5686;
+	}
+
+	.status-note {
+		margin: 0.5rem 0 0;
+		padding: 0.48rem 0.6rem;
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.72);
+		font-size: 0.76rem;
+		color: #7d5ca8;
 	}
 
 	.card-header {

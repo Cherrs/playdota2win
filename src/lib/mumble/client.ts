@@ -73,9 +73,9 @@ export function createInitialMumbleClientSnapshot(): MumbleClientSnapshot {
 		users: [],
 		messages: [],
 		onlineCount: 0,
-		muted: false,
+		muted: true,
 		deafened: false,
-		voiceRequested: false,
+		voiceRequested: true,
 		voiceAvailable: false,
 		voiceConnected: false,
 		voiceFailed: false,
@@ -222,12 +222,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			? (users.find((user) => user.sessionId === snapshot.sessionId) ?? null)
 			: null;
 
+		// Intentionally split authority: snapshot.muted/deafened drive the local controls, while
+		// users[] (including self) remains the last server-reported roster state for rendering.
 		patch({
 			users,
 			onlineCount: users.length,
-			currentChannelId: self?.channelId ?? snapshot.currentChannelId,
-			muted: self?.muted ?? snapshot.muted,
-			deafened: self?.deafened ?? snapshot.deafened
+			currentChannelId: self?.channelId ?? snapshot.currentChannelId
 		});
 	}
 
@@ -292,6 +292,33 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		patch({
 			playbackBlocked: results.some((result) => result.status === 'rejected')
 		});
+	}
+
+	function applyMutedIntent(): void {
+		if (localStream) {
+			for (const track of localStream.getAudioTracks()) {
+				track.enabled = !snapshot.muted;
+			}
+		}
+
+		if (socket?.readyState === SOCKET_OPEN) {
+			sendEvent({ type: 'mute', data: { muted: snapshot.muted } });
+		}
+	}
+
+	function applyDeafenedIntent(): void {
+		for (const audio of remoteAudioElements.values()) {
+			audio.muted = snapshot.deafened;
+		}
+
+		if (socket?.readyState === SOCKET_OPEN) {
+			sendEvent({ type: 'deafen', data: { deafened: snapshot.deafened } });
+		}
+	}
+
+	function applyLocalVoiceIntent(): void {
+		applyMutedIntent();
+		applyDeafenedIntent();
 	}
 
 	async function ensurePeerConnection(): Promise<void> {
@@ -438,15 +465,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			}
 		}
 
-		for (const track of localStream.getAudioTracks()) {
-			track.enabled = !snapshot.muted;
-		}
-
 		patch({
 			voiceAvailable: true,
 			audioPermission: 'granted',
 			errorMessage: ''
 		});
+		applyLocalVoiceIntent();
 
 		if (snapshot.connected) {
 			await ensurePeerConnection();
@@ -524,11 +548,14 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				if (mode === 'monitor') {
 					sendEvent({ type: 'deafen', data: { deafened: true } });
 					patch({ deafened: true });
-				} else if (pendingVoiceRequest) {
+				} else if (mode === 'interactive' && pendingVoiceRequest) {
 					pendingVoiceRequest = false;
 					await ensureVoice();
-				} else if (localStream) {
-					await ensurePeerConnection();
+				} else if (mode === 'interactive') {
+					if (localStream && snapshot.voiceRequested) {
+						await ensurePeerConnection();
+					}
+					applyLocalVoiceIntent();
 				}
 				return;
 			}
@@ -613,7 +640,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 		shouldReconnect = true;
 		clearReconnectTimer();
-		pendingVoiceRequest = connectOptions?.requestVoice === true && mode === 'interactive';
+		const requestedVoice =
+			mode === 'interactive' && (connectOptions?.requestVoice ?? snapshot.voiceRequested);
+		if (mode === 'interactive' && connectOptions?.requestVoice !== undefined) {
+			patch({ voiceRequested: requestedVoice });
+		}
+		pendingVoiceRequest = requestedVoice;
 
 		patch({
 			status: reconnectAttempts > 0 ? 'reconnecting' : 'connecting',
@@ -654,10 +686,17 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			return;
 		}
 
+		const requestedVoice =
+			connectOptions?.requestVoice ?? (mode === 'interactive' && snapshot.voiceRequested);
+		const stopLocalStream = mode === 'interactive' && connectOptions?.requestVoice === false;
+
 		shouldReconnect = true;
 		reconnectAttempts = 0;
 		clearReconnectTimer();
-		cleanupPeerConnection(false);
+		cleanupPeerConnection(stopLocalStream);
+		if (mode === 'interactive' && connectOptions?.requestVoice !== undefined) {
+			patch({ voiceRequested: requestedVoice });
+		}
 		patch({
 			status: 'reconnecting',
 			reconnecting: true,
@@ -667,8 +706,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 		const existingSocket = socket;
 		const nextConnectOptions = {
-			requestVoice:
-				connectOptions?.requestVoice ?? (mode === 'interactive' && snapshot.voiceRequested)
+			requestVoice: requestedVoice
 		} satisfies ConnectOptions;
 
 		if (!existingSocket || existingSocket.readyState === WebSocket.CLOSED) {
@@ -784,23 +822,13 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	}
 
 	function setMuted(muted: boolean): void {
-		if (localStream) {
-			for (const track of localStream.getAudioTracks()) {
-				track.enabled = !muted;
-			}
-		}
-
 		patch({ muted });
-		sendEvent({ type: 'mute', data: { muted } });
+		applyMutedIntent();
 	}
 
 	function setDeafened(deafened: boolean): void {
-		for (const audio of remoteAudioElements.values()) {
-			audio.muted = deafened;
-		}
-
 		patch({ deafened });
-		sendEvent({ type: 'deafen', data: { deafened } });
+		applyDeafenedIntent();
 
 		if (!deafened) {
 			void resumeAudioPlayback();
