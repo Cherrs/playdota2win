@@ -116,3 +116,22 @@ export function parseFileFromUrl(url: string): ParsedFilenameInfo {
 
 	return parseFilename(filename);
 }
+
+/**
+ * 从下载地址或文件名中解析展示用文件信息。
+ * filename 保留完整文件名和扩展名，方便直接写入下载项的文件名字段。
+ */
+export function parseDownloadFileInfo(input: string): ParsedFilenameInfo {
+	const value = input.trim();
+	if (!value) {
+		return {};
+	}
+
+	const filename = extractFilenameFromUrl(value) || value;
+	const parsed = parseFilename(filename);
+
+	return {
+		...parsed,
+		filename
+	};
+}

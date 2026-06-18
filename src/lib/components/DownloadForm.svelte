@@ -7,7 +7,7 @@
 		S3Config,
 		Category
 	} from '$lib/types';
-	import { parseFileFromUrl } from '$lib/utils/parseFilename';
+	import { parseDownloadFileInfo } from '$lib/utils/parseFilename';
 
 	interface Props {
 		categories: Category[];
@@ -38,23 +38,31 @@
 	let formS3Region = $state('auto');
 	let formCategoryId = $state<string | undefined>(undefined);
 
-	// 处理URL输入变化，自动提取文件名信息
-	function handleUrlChange() {
-		if (formStorageType === 'link' && formUrl) {
-			const parsed = parseFileFromUrl(formUrl);
+	function applyParsedFileInfo(input: string, updateFilename: boolean) {
+		const parsed = parseDownloadFileInfo(input);
 
-			// 只有在字段为空时才自动填充，避免覆盖用户已输入的值
-			if (parsed.filename && !formFilename) {
-				formFilename = parsed.filename;
-			}
-			if (parsed.version && !formVersion) {
-				formVersion = parsed.version;
-			}
-			if (parsed.platform && formPlatform === 'windows') {
-				// 只有在还是默认值时才自动设置平台
-				formPlatform = parsed.platform;
-			}
+		if (updateFilename && parsed.filename) {
+			formFilename = parsed.filename;
 		}
+		if (parsed.version) {
+			formVersion = parsed.version;
+		}
+		if (parsed.platform) {
+			formPlatform = parsed.platform;
+		}
+	}
+
+	// 处理 URL 或文件名输入变化，自动提取文件名、版本号和平台
+	function handleUrlChange(event: Event) {
+		if (formStorageType === 'link') {
+			const input = event.currentTarget as HTMLInputElement;
+			applyParsedFileInfo(input.value, true);
+		}
+	}
+
+	function handleFilenameChange(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		applyParsedFileInfo(input.value, false);
 	}
 
 	// 重置表单
@@ -85,6 +93,7 @@
 			if (!formFilename) {
 				formFilename = input.files[0].name;
 			}
+			applyParsedFileInfo(input.files[0].name, false);
 			const sizeMB = (input.files[0].size / (1024 * 1024)).toFixed(1);
 			formSize = `${sizeMB}MB`;
 		}
@@ -262,6 +271,7 @@
 				id="filename"
 				type="text"
 				bind:value={formFilename}
+				oninput={handleFilenameChange}
 				placeholder="例如：PlayDota2Win.exe"
 			/>
 		</div>
@@ -289,7 +299,7 @@
 				id="url"
 				type="url"
 				bind:value={formUrl}
-				onchange={handleUrlChange}
+				oninput={handleUrlChange}
 				placeholder="https://example.com/download.exe"
 			/>
 		</div>

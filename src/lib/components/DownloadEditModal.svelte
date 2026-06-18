@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DownloadItem, ApiResponse, Platform, Category } from '$lib/types';
 	import { trapFocus, focusFirstElement } from '$lib/utils/a11y';
+	import { parseDownloadFileInfo } from '$lib/utils/parseFilename';
 
 	interface Props {
 		item: DownloadItem;
@@ -42,6 +43,30 @@
 		formUrl = item.url || '';
 		formCategoryId = item.categoryId;
 	});
+
+	function applyParsedFileInfo(input: string, updateFilename: boolean) {
+		const parsed = parseDownloadFileInfo(input);
+
+		if (updateFilename && parsed.filename) {
+			formFilename = parsed.filename;
+		}
+		if (parsed.version) {
+			formVersion = parsed.version;
+		}
+		if (parsed.platform) {
+			formPlatform = parsed.platform;
+		}
+	}
+
+	function handleUrlChange(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		applyParsedFileInfo(input.value, true);
+	}
+
+	function handleFilenameChange(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		applyParsedFileInfo(input.value, false);
+	}
 
 	async function handleSave() {
 		if (!formVersion || !formSize) {
@@ -187,6 +212,7 @@
 					id="editUrl"
 					type="text"
 					bind:value={formUrl}
+					oninput={handleUrlChange}
 					placeholder="https://example.com/download.exe 或 /api/admin/download/..."
 				/>
 				<p class="field-hint">外部链接、R2 内部路径或中转地址均可；保存后用户下载会使用这个地址。</p>
@@ -198,6 +224,7 @@
 					id="editFilename"
 					type="text"
 					bind:value={formFilename}
+					oninput={handleFilenameChange}
 					placeholder="例如：PlayDota2Win.exe"
 				/>
 			</div>
