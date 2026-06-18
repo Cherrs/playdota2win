@@ -280,6 +280,15 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 				}
 			}
 		}
+		if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'url')) {
+			const url = normalizedUpdates.url;
+			if (typeof url !== 'string' || !url.trim()) {
+				return json({ success: false, error: 'URL is required' } satisfies ApiResponse, {
+					status: 400
+				});
+			}
+			normalizedUpdates.url = url.trim();
+		}
 
 		const list = await getDownloadList(kv);
 		const index = list.items.findIndex((item) => item.id === id);

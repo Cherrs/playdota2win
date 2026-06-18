@@ -27,6 +27,7 @@
 	let formFilename = $state('');
 	let formVersion = $state('');
 	let formSize = $state('');
+	let formUrl = $state('');
 	let formCategoryId = $state<string | undefined>(undefined);
 
 	// 当 item 变化时重新初始化表单
@@ -38,12 +39,17 @@
 		formFilename = item.filename || '';
 		formVersion = item.version;
 		formSize = item.size;
+		formUrl = item.url || '';
 		formCategoryId = item.categoryId;
 	});
 
 	async function handleSave() {
 		if (!formVersion || !formSize) {
 			error = '请填写版本和大小';
+			return;
+		}
+		if (!formUrl.trim()) {
+			error = '请填写下载地址';
 			return;
 		}
 
@@ -61,7 +67,8 @@
 				configGuide: formConfigGuide.trim(),
 				filename: formFilename.trim(),
 				version: formVersion.trim(),
-				size: formSize.trim()
+				size: formSize.trim(),
+				url: formUrl.trim()
 			};
 
 			const res = await fetch('/api/admin', {
@@ -119,7 +126,7 @@
 
 		<div class="auth-form modal-form-grid">
 			<div class="form-group full-width">
-				<p class="field-hint">仅支持编辑文字信息，存储方式与下载链接请在重新添加时调整。</p>
+				<p class="field-hint">可修改展示信息和下载地址；如需更换存储方式或重新上传文件，请重新添加下载项。</p>
 			</div>
 			<div class="form-group">
 				<label for="editPlatform">平台</label>
@@ -172,6 +179,17 @@
 					placeholder="每行一条步骤，例如：复制 验证码123 或 打开 mumble://xxx"
 				></textarea>
 				<p class="field-hint">支持动作：复制 xxx / 打开 mumble://xxx 或 https://</p>
+			</div>
+
+			<div class="form-group full-width">
+				<label for="editUrl">下载地址</label>
+				<input
+					id="editUrl"
+					type="text"
+					bind:value={formUrl}
+					placeholder="https://example.com/download.exe 或 /api/admin/download/..."
+				/>
+				<p class="field-hint">外部链接、R2 内部路径或中转地址均可；保存后用户下载会使用这个地址。</p>
 			</div>
 
 			<div class="form-group">
