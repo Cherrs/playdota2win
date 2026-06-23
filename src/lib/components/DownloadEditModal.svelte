@@ -30,6 +30,9 @@
 	let formSize = $state('');
 	let formUrl = $state('');
 	let formCategoryId = $state<string | undefined>(undefined);
+	let formRustDeskEnabled = $state(false);
+	let formRustDeskIdServer = $state('');
+	let formRustDeskKey = $state('');
 
 	// 当 item 变化时重新初始化表单
 	$effect(() => {
@@ -42,6 +45,9 @@
 		formSize = item.size;
 		formUrl = item.url || '';
 		formCategoryId = item.categoryId;
+		formRustDeskEnabled = item.rustdeskConfig?.enabled === true;
+		formRustDeskIdServer = item.rustdeskConfig?.idServer || '';
+		formRustDeskKey = item.rustdeskConfig?.key || '';
 	});
 
 	function applyParsedFileInfo(input: string, updateFilename: boolean) {
@@ -77,6 +83,10 @@
 			error = '请填写下载地址';
 			return;
 		}
+		if (formRustDeskEnabled && (!formRustDeskIdServer.trim() || !formRustDeskKey.trim())) {
+			error = '请填写 RustDesk ID 服务器和 key';
+			return;
+		}
 
 		saving = true;
 		error = '';
@@ -93,7 +103,12 @@
 				filename: formFilename.trim(),
 				version: formVersion.trim(),
 				size: formSize.trim(),
-				url: formUrl.trim()
+				url: formUrl.trim(),
+				rustdeskConfig: {
+					enabled: formRustDeskEnabled,
+					idServer: formRustDeskIdServer.trim(),
+					key: formRustDeskKey.trim()
+				}
 			};
 
 			const res = await fetch('/api/admin', {
@@ -151,7 +166,9 @@
 
 		<div class="auth-form modal-form-grid">
 			<div class="form-group full-width">
-				<p class="field-hint">可修改展示信息和下载地址；如需更换存储方式或重新上传文件，请重新添加下载项。</p>
+				<p class="field-hint">
+					可修改展示信息和下载地址；如需更换存储方式或重新上传文件，请重新添加下载项。
+				</p>
 			</div>
 			<div class="form-group">
 				<label for="editPlatform">平台</label>
@@ -192,8 +209,7 @@
 				<textarea
 					id="editDescription"
 					bind:value={formDescription}
-					placeholder="简短描述这个版本的特性或用途"
-				></textarea>
+					placeholder="简短描述这个版本的特性或用途"></textarea>
 			</div>
 
 			<div class="form-group full-width">
@@ -201,8 +217,7 @@
 				<textarea
 					id="editConfigGuide"
 					bind:value={formConfigGuide}
-					placeholder="每行一条步骤，例如：复制 验证码123 或 打开 mumble://xxx"
-				></textarea>
+					placeholder="每行一条步骤，例如：复制 验证码123 或 打开 mumble://xxx"></textarea>
 				<p class="field-hint">支持动作：复制 xxx / 打开 mumble://xxx 或 https://</p>
 			</div>
 
@@ -215,7 +230,9 @@
 					oninput={handleUrlChange}
 					placeholder="https://example.com/download.exe 或 /api/admin/download/..."
 				/>
-				<p class="field-hint">外部链接、R2 内部路径或中转地址均可；保存后用户下载会使用这个地址。</p>
+				<p class="field-hint">
+					外部链接、R2 内部路径或中转地址均可；保存后用户下载会使用这个地址。
+				</p>
 			</div>
 
 			<div class="form-group">
@@ -232,6 +249,39 @@
 			<div class="form-group">
 				<label for="editSize">文件大小</label>
 				<input id="editSize" type="text" bind:value={formSize} placeholder="45MB" />
+			</div>
+
+			<div class="rustdesk-config full-width">
+				<label class="checkbox-label" for="editRustdeskEnabled">
+					<input id="editRustdeskEnabled" type="checkbox" bind:checked={formRustDeskEnabled} />
+					<span>作为 RustDesk 配置接口数据源</span>
+				</label>
+				<p class="field-hint">
+					开启后，公开接口 /api/rustdesk 会返回此下载项的下载链接、ID 服务器和 key。
+				</p>
+
+				{#if formRustDeskEnabled}
+					<div class="rustdesk-grid">
+						<div class="form-group">
+							<label for="editRustdeskIdServer">RustDesk ID 服务器</label>
+							<input
+								id="editRustdeskIdServer"
+								type="text"
+								bind:value={formRustDeskIdServer}
+								placeholder="例如：rustdesk.example.com"
+							/>
+						</div>
+						<div class="form-group">
+							<label for="editRustdeskKey">RustDesk key</label>
+							<input
+								id="editRustdeskKey"
+								type="text"
+								bind:value={formRustDeskKey}
+								placeholder="请输入 RustDesk key"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</div>
 
@@ -391,6 +441,38 @@
 		font-size: 0.8rem;
 		color: #a89bc4;
 		margin: 0;
+	}
+
+	.rustdesk-config {
+		background: rgba(0, 150, 136, 0.06);
+		border: 1px solid rgba(0, 150, 136, 0.12);
+		border-radius: 12px;
+		padding: 1rem;
+	}
+
+	.rustdesk-config.full-width {
+		grid-column: 1 / -1;
+	}
+
+	.checkbox-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-weight: 600;
+		color: #2f7f77;
+		cursor: pointer;
+	}
+
+	.checkbox-label input {
+		width: 16px;
+		height: 16px;
+	}
+
+	.rustdesk-grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 1rem;
+		margin-top: 1rem;
 	}
 
 	.btn {

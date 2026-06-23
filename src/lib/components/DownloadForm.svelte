@@ -37,6 +37,9 @@
 	let formS3PublicUrl = $state('');
 	let formS3Region = $state('auto');
 	let formCategoryId = $state<string | undefined>(undefined);
+	let formRustDeskEnabled = $state(false);
+	let formRustDeskIdServer = $state('');
+	let formRustDeskKey = $state('');
 
 	function applyParsedFileInfo(input: string, updateFilename: boolean) {
 		const parsed = parseDownloadFileInfo(input);
@@ -81,6 +84,9 @@
 		formS3PublicUrl = '';
 		formS3Region = 'auto';
 		formCategoryId = undefined;
+		formRustDeskEnabled = false;
+		formRustDeskIdServer = '';
+		formRustDeskKey = '';
 		error = '';
 		success = '';
 	}
@@ -103,6 +109,10 @@
 	async function handleAdd() {
 		if (!formVersion || !formSize) {
 			error = '请填写版本和大小';
+			return;
+		}
+		if (formRustDeskEnabled && (!formRustDeskIdServer.trim() || !formRustDeskKey.trim())) {
+			error = '请填写 RustDesk ID 服务器和 key';
 			return;
 		}
 
@@ -128,6 +138,14 @@
 			formData.append('version', formVersion);
 			formData.append('size', formSize);
 			formData.append('storageType', formStorageType);
+			formData.append(
+				'rustdeskConfig',
+				JSON.stringify({
+					enabled: formRustDeskEnabled,
+					idServer: formRustDeskIdServer.trim(),
+					key: formRustDeskKey.trim()
+				})
+			);
 
 			if (formCategoryId) {
 				formData.append('categoryId', formCategoryId);
@@ -251,8 +269,7 @@
 			<textarea
 				id="description"
 				bind:value={formDescription}
-				placeholder="简短描述这个版本的特性或用途"
-			></textarea>
+				placeholder="简短描述这个版本的特性或用途"></textarea>
 		</div>
 
 		<div class="form-group full-width">
@@ -260,8 +277,7 @@
 			<textarea
 				id="configGuide"
 				bind:value={formConfigGuide}
-				placeholder="每行一条步骤，例如：复制 验证码123 或 打开 mumble://xxx"
-			></textarea>
+				placeholder="每行一条步骤，例如：复制 验证码123 或 打开 mumble://xxx"></textarea>
 			<p class="field-hint">支持动作：复制 xxx / 打开 mumble://xxx 或 https://</p>
 		</div>
 
@@ -359,6 +375,39 @@
 			</div>
 		</div>
 	{/if}
+
+	<div class="rustdesk-config">
+		<label class="checkbox-label" for="rustdeskEnabled">
+			<input id="rustdeskEnabled" type="checkbox" bind:checked={formRustDeskEnabled} />
+			<span>作为 RustDesk 配置接口数据源</span>
+		</label>
+		<p class="field-hint">
+			开启后，公开接口 /api/rustdesk 会返回此下载项的下载链接、ID 服务器和 key。
+		</p>
+
+		{#if formRustDeskEnabled}
+			<div class="form-grid rustdesk-grid">
+				<div class="form-group">
+					<label for="rustdeskIdServer">RustDesk ID 服务器</label>
+					<input
+						id="rustdeskIdServer"
+						type="text"
+						bind:value={formRustDeskIdServer}
+						placeholder="例如：rustdesk.example.com"
+					/>
+				</div>
+				<div class="form-group">
+					<label for="rustdeskKey">RustDesk key</label>
+					<input
+						id="rustdeskKey"
+						type="text"
+						bind:value={formRustDeskKey}
+						placeholder="请输入 RustDesk key"
+					/>
+				</div>
+			</div>
+		{/if}
+	</div>
 
 	<div class="form-actions">
 		<button class="btn btn-primary" onclick={handleAdd} disabled={saving}>
@@ -490,6 +539,32 @@
 		margin: 0 0 1rem;
 		font-size: 1.1rem;
 		color: #6b4c9a;
+	}
+
+	.rustdesk-config {
+		background: rgba(0, 150, 136, 0.06);
+		border: 1px solid rgba(0, 150, 136, 0.12);
+		border-radius: 12px;
+		padding: 1rem;
+		margin: 1rem 0;
+	}
+
+	.checkbox-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-weight: 600;
+		color: #2f7f77;
+		cursor: pointer;
+	}
+
+	.checkbox-label input {
+		width: 16px;
+		height: 16px;
+	}
+
+	.rustdesk-grid {
+		margin: 1rem 0 0;
 	}
 
 	.form-actions {

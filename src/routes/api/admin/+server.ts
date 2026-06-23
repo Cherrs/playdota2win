@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import type { DownloadList, DownloadItem, ApiResponse, S3Config } from '$lib/types';
+import type { DownloadList, DownloadItem, ApiResponse, S3Config, RustDeskConfig } from '$lib/types';
 import { requireAdminAuth, signDownloadPath } from '$lib/admin-auth';
 
 const KV_KEY = 'downloads_list';
@@ -37,6 +37,36 @@ function getFilenameFromUrl(url: string): string {
 	} catch {
 		return 'download';
 	}
+}
+
+function normalizeRustDeskConfig(value: unknown): RustDeskConfig | undefined {
+	let raw = value;
+	if (typeof raw === 'string') {
+		if (!raw.trim()) return undefined;
+		try {
+			raw = JSON.parse(raw) as unknown;
+		} catch {
+			throw new Error('Invalid RustDesk config');
+		}
+	}
+
+	if (!raw || typeof raw !== 'object') {
+		return undefined;
+	}
+
+	const config = raw as Record<string, unknown>;
+	const enabled = config.enabled === true || config.enabled === 'true';
+	const idServer = typeof config.idServer === 'string' ? config.idServer.trim() : '';
+	const key = typeof config.key === 'string' ? config.key.trim() : '';
+
+	if (!enabled) {
+		return undefined;
+	}
+	if (!idServer || !key) {
+		throw new Error('RustDesk ID server and key are required');
+	}
+
+	return { enabled: true, idServer, key };
 }
 
 // 辅助函数：上传到自定义 S3（使用预签名 URL）
@@ -137,6 +167,18 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const size = formData.get('size') as string;
 		const storageType = formData.get('storageType') as 'link' | 'r2' | 's3';
 		const categoryId = (formData.get('categoryId') as string) || undefined;
+		let rustdeskConfig: RustDeskConfig | undefined;
+		try {
+			rustdeskConfig = normalizeRustDeskConfig(formData.get('rustdeskConfig'));
+		} catch (error) {
+			return json(
+				{
+					success: false,
+					error: error instanceof Error ? error.message : 'Invalid RustDesk config'
+				} satisfies ApiResponse,
+				{ status: 400 }
+			);
+		}
 
 		const allowedPlatforms = ['windows', 'macos', 'linux'] as const;
 		const allowedStorageTypes = ['link', 'r2', 's3'] as const;
@@ -216,6 +258,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			title: title || undefined,
 			description: description || undefined,
 			configGuide: configGuide || undefined,
+			rustdeskConfig,
 			filename: resolvedFilename,
 			version,
 			size,
@@ -288,6 +331,21 @@ export const PUT: RequestHandler = async ({ request, platform }) => {
 				});
 			}
 			normalizedUpdates.url = url.trim();
+		}
+		if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'rustdeskConfig')) {
+			try {
+				normalizedUpdates.rustdeskConfig = normalizeRustDeskConfig(
+					normalizedUpdates.rustdeskConfig
+				);
+			} catch (error) {
+				return json(
+					{
+						success: false,
+						error: error instanceof Error ? error.message : 'Invalid RustDesk config'
+					} satisfies ApiResponse,
+					{ status: 400 }
+				);
+			}
 		}
 
 		const list = await getDownloadList(kv);

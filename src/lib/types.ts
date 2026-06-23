@@ -37,6 +37,18 @@ export interface CategoryList {
 }
 
 /**
+ * RustDesk 客户端公开配置
+ */
+export interface RustDeskConfig {
+	/** 是否作为 RustDesk 配置接口的数据源 */
+	enabled: boolean;
+	/** RustDesk ID 服务器 */
+	idServer: string;
+	/** RustDesk key */
+	key: string;
+}
+
+/**
  * 下载项
  */
 export interface DownloadItem {
@@ -50,6 +62,8 @@ export interface DownloadItem {
 	description?: string;
 	/** 配置指引（多行文本） */
 	configGuide?: string;
+	/** RustDesk 公开配置（仅 RustDesk 下载项使用） */
+	rustdeskConfig?: RustDeskConfig;
 	/** 文件名（可选） */
 	filename?: string;
 	version: string;
@@ -110,6 +124,7 @@ export interface UploadFormData {
 	title?: string;
 	description?: string;
 	configGuide?: string;
+	rustdeskConfig?: RustDeskConfig;
 	filename?: string;
 	version: string;
 	size: string;

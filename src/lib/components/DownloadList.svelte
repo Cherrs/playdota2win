@@ -243,6 +243,9 @@
 							{item.title || `${item.platform.toUpperCase()} - ${item.version}`}
 							<span class="badge badge-{item.storageType}">{getStorageLabel(item.storageType)}</span
 							>
+							{#if item.rustdeskConfig?.enabled}
+								<span class="badge badge-rustdesk">RustDesk 接口</span>
+							{/if}
 							{#if item.categoryId}
 								{@const cat = categories.find((c) => c.id === item.categoryId)}
 								{#if cat}
@@ -524,6 +527,11 @@
 		font-size: 0.7rem;
 		padding: 0.15rem 0.5rem;
 		border-radius: 6px;
+	}
+
+	.badge-rustdesk {
+		background: rgba(0, 150, 136, 0.12);
+		color: #16847b;
 	}
 
 	.item-meta {
