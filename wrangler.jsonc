@@ -6,17 +6,27 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "playdota2win",
 	"main": ".svelte-kit/cloudflare/_worker.js",
-	"compatibility_date": "2025-09-27",
-	"compatibility_flags": [
-		"nodejs_als",
-		"nodejs_compat"
-	],
+	"compatibility_date": "2026-07-13",
+	"compatibility_flags": ["nodejs_als", "nodejs_compat", "global_fetch_strictly_public"],
+	"keep_vars": true,
+	"minify": true,
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"invocation_logs": true,
+			"persist": true
+		},
+		"traces": {
+			"enabled": true,
+			"head_sampling_rate": 0.05,
+			"persist": true
+		}
 	},
 	/**
 	 * KV Namespaces
@@ -38,6 +48,13 @@
 			"bucket_name": "downloads"
 		}
 	],
+	"vars": {
+		// Public Turnstile site key stays managed as a dashboard variable; keep_vars prevents
+		// Wrangler deployments from deleting it. Secrets remain managed with `wrangler secret`.
+		"MUMBLE_PROXY_WS_URL": "wss://voice.playdota2.win/ws",
+		"MUMBLE_PROXY_HEALTH_URL": "https://voice.playdota2.win/health",
+		"MUMBLE_PROXY_STUN_SERVERS": "stun:turn.playdota2.win:3478,turn:turn.playdota2.win:3478,turns:turn.playdota2.win:5349?transport=tcp"
+	},
 	"routes": [
 		{
 			"pattern": "playdota2.win",

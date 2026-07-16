@@ -1,25 +1,28 @@
 /**
- * Turnstile 前端客户端工具
- * 用于在浏览器端加载、渲染和管理 Cloudflare Turnstile 小部件
+ * Cloudflare Turnstile 的浏览器端显式渲染工具。
+ * 动态弹窗共享一次脚本加载，但各自管理 widget 的创建与销毁。
  */
-
-declare global {
-	interface Window {
-		turnstile: {
-			render: (container: HTMLElement, options: TurnstileRenderOptions) => string;
-			remove: (widgetId: string) => void;
-			reset: (widgetId: string) => void;
-		};
-		onTurnstileLoad?: () => void;
-	}
-}
 
 export interface TurnstileRenderOptions {
 	sitekey: string;
 	theme?: 'light' | 'dark' | 'auto';
+	action?: string;
+	cData?: string;
 	callback?: (token: string) => void;
 	'expired-callback'?: () => void;
-	'error-callback'?: () => void;
+	'error-callback'?: (errorCode?: string) => boolean | void;
+}
+
+export interface TurnstileApi {
+	render: (container: HTMLElement, options: TurnstileRenderOptions) => string;
+	remove: (widgetId: string) => void;
+	reset: (widgetId: string) => void;
+}
+
+declare global {
+	interface Window {
+		turnstile?: TurnstileApi;
+	}
 }
 
 export interface TurnstileState {
@@ -30,9 +33,15 @@ export interface TurnstileState {
 	loaded: boolean;
 }
 
-/**
- * 创建初始 Turnstile 状态
- */
+const TURNSTILE_SCRIPT_SELECTOR = 'script[src*="challenges.cloudflare.com/turnstile/v0/api.js"]';
+const TURNSTILE_SCRIPT_URL =
+	'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+const TURNSTILE_LOAD_TIMEOUT_MS = 15_000;
+const TURNSTILE_READY_POLL_MS = 50;
+
+let turnstileLoadPromise: Promise<TurnstileApi> | null = null;
+
+/** 创建初始 Turnstile 状态。 */
 export function createTurnstileState(): TurnstileState {
 	return {
 		required: false,
@@ -44,83 +53,130 @@ export function createTurnstileState(): TurnstileState {
 }
 
 /**
- * 加载 Turnstile 脚本
+ * 加载 Turnstile API。并发调用共享同一个 Promise；已有脚本仍在加载时继续等待，
+ * 不会把“存在 script 标签”误判为 API 已就绪。
  */
-export function loadTurnstileScript(onLoad: () => void): void {
-	// 检查是否已加载
-	if (window.turnstile || document.querySelector('script[src*="turnstile"]')) {
-		onLoad();
-		return;
+export function loadTurnstileScript(): Promise<TurnstileApi> {
+	if (typeof window === 'undefined' || typeof document === 'undefined') {
+		return Promise.reject(new Error('Turnstile is only available in the browser'));
 	}
+	if (window.turnstile) return Promise.resolve(window.turnstile);
+	if (turnstileLoadPromise) return turnstileLoadPromise;
 
-	const script = document.createElement('script');
-	script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad';
-	script.async = true;
+	const promise = new Promise<TurnstileApi>((resolve, reject) => {
+		let script = document.querySelector<HTMLScriptElement>(TURNSTILE_SCRIPT_SELECTOR);
+		let appendScript = false;
+		let settled = false;
+		const timers: { timeoutId?: number; pollId?: number } = {};
 
-	window.onTurnstileLoad = () => {
-		onLoad();
-	};
+		const cleanup = () => {
+			if (timers.timeoutId !== undefined) window.clearTimeout(timers.timeoutId);
+			if (timers.pollId !== undefined) window.clearInterval(timers.pollId);
+			script?.removeEventListener('load', handleReady);
+			script?.removeEventListener('error', handleError);
+		};
 
-	document.head.appendChild(script);
+		const succeed = () => {
+			if (settled || !window.turnstile) return;
+			settled = true;
+			cleanup();
+			resolve(window.turnstile);
+		};
+
+		function handleReady() {
+			succeed();
+		}
+
+		function handleError() {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			script?.remove();
+			reject(new Error('Failed to load Turnstile'));
+		}
+
+		if (!script) {
+			script = document.createElement('script');
+			script.src = TURNSTILE_SCRIPT_URL;
+			script.async = true;
+			script.defer = true;
+			script.dataset.playdota2winTurnstile = 'true';
+			appendScript = true;
+		}
+
+		script.addEventListener('load', handleReady);
+		script.addEventListener('error', handleError);
+		if (appendScript) document.head.appendChild(script);
+		timers.pollId = window.setInterval(succeed, TURNSTILE_READY_POLL_MS);
+		timers.timeoutId = window.setTimeout(handleError, TURNSTILE_LOAD_TIMEOUT_MS);
+		succeed();
+	});
+
+	turnstileLoadPromise = promise;
+	void promise.then(
+		() => {
+			if (turnstileLoadPromise === promise) turnstileLoadPromise = null;
+		},
+		() => {
+			if (turnstileLoadPromise === promise) turnstileLoadPromise = null;
+		}
+	);
+	return promise;
 }
 
 /**
- * 渲染 Turnstile 小部件
+ * 页面进入时静默预加载 Turnstile。预加载失败不会提前打扰用户；真正需要验证时，
+ * loadTurnstileScript() 会重新发起加载并由调用方展示错误状态。
  */
+export function preloadTurnstileScript(): void {
+	if (typeof window === 'undefined' || typeof document === 'undefined') return;
+	void loadTurnstileScript().catch(() => undefined);
+}
+
+/** 在指定元素中创建一个 Turnstile widget。 */
 export function renderTurnstile(
-	containerId: string,
+	container: HTMLElement,
 	siteKey: string,
 	callbacks: {
 		onSuccess: (token: string) => void;
 		onExpired: () => void;
 		onError: (message: string) => void;
 	},
-	currentWidgetId: string | null
+	flow: 'admin-auth' | 'download-auth' = 'download-auth'
 ): string | null {
-	if (!window.turnstile || !siteKey) {
-		return null;
-	}
+	if (!window.turnstile || !siteKey || !container.isConnected) return null;
 
-	const container = document.getElementById(containerId);
-	if (!container) {
-		return null;
-	}
-
-	// 清理旧的 widget
-	if (currentWidgetId) {
-		try {
-			window.turnstile.remove(currentWidgetId);
-		} catch {
-			/* ignore */
-		}
-	}
-
-	// 清空容器
-	container.innerHTML = '';
-
-	// 渲染新的 widget
-	const widgetId = window.turnstile.render(container, {
+	container.replaceChildren();
+	return window.turnstile.render(container, {
 		sitekey: siteKey,
 		theme: 'light',
+		action: 'turnstile-spin-v1',
+		cData: flow,
 		callback: callbacks.onSuccess,
 		'expired-callback': callbacks.onExpired,
 		'error-callback': () => {
-			callbacks.onError('人机验证加载失败，请刷新页面重试');
+			callbacks.onError('人机验证加载失败，请重试');
+			return true;
 		}
 	});
-
-	return widgetId;
 }
 
-/**
- * 重置 Turnstile 小部件
- */
+/** 重置现有 widget。 */
 export function resetTurnstile(widgetId: string | null): void {
-	if (widgetId && window.turnstile) {
-		try {
-			window.turnstile.reset(widgetId);
-		} catch {
-			/* ignore */
-		}
+	if (!widgetId || !window.turnstile) return;
+	try {
+		window.turnstile.reset(widgetId);
+	} catch {
+		/* widget 可能已经由 Turnstile 清理 */
+	}
+}
+
+/** 销毁现有 widget 及其 DOM。 */
+export function removeTurnstile(widgetId: string | null): void {
+	if (!widgetId || !window.turnstile) return;
+	try {
+		window.turnstile.remove(widgetId);
+	} catch {
+		/* widget 可能已经被销毁 */
 	}
 }

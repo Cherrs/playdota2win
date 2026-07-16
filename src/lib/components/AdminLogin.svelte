@@ -1,6 +1,9 @@
 <script lang="ts">
+	import { onDestroy, tick } from 'svelte';
 	import {
 		loadTurnstileScript,
+		preloadTurnstileScript,
+		removeTurnstile,
 		renderTurnstile,
 		resetTurnstile
 	} from '$lib/utils/turnstile-client';
@@ -9,22 +12,22 @@
 
 	interface Props {
 		onLoginSuccess: () => void;
-	}
-
-	interface TurnstileCheckResponse {
-		requireTurnstile: boolean;
-		siteKey: string;
-		failureCount: number;
+		initialTurnstileRequired?: boolean;
+		initialTurnstileSiteKey?: string;
 	}
 
 	interface LoginResponse {
-		token?: string;
+		authenticated?: boolean;
 		requireTurnstile?: boolean;
 		siteKey?: string;
 		failureCount?: number;
 	}
 
-	let { onLoginSuccess }: Props = $props();
+	let {
+		onLoginSuccess,
+		initialTurnstileRequired = false,
+		initialTurnstileSiteKey = ''
+	}: Props = $props();
 
 	// 认证状态
 	let password = $state('');
@@ -35,49 +38,83 @@
 	let requireTurnstile = $state(false);
 	let turnstileSiteKey = $state('');
 	let turnstileToken = $state('');
-	let turnstileWidgetId = $state<string | null>(null);
-	let turnstileLoaded = $state(false);
+	let turnstileLoadFailed = $state(false);
+	let turnstileContainerRef = $state<HTMLDivElement | null>(null);
+	let turnstileWidgetId: string | null = null;
+	let renderedTurnstileSiteKey = '';
+	let turnstileGeneration = 0;
 
-	// 检查是否需要 Turnstile
-	async function checkTurnstileRequired() {
-		try {
-			const res = await fetch('/api/admin/auth');
-			const data: ApiResponse<TurnstileCheckResponse> = await res.json();
-			if (data.success && data.data) {
-				requireTurnstile = data.data.requireTurnstile;
-				turnstileSiteKey = data.data.siteKey;
-				if (requireTurnstile && turnstileSiteKey) {
-					loadTurnstileScript(() => {
-						turnstileLoaded = true;
-						doRenderTurnstile();
-					});
-				}
-			}
-		} catch (e) {
-			console.error('Failed to check turnstile status:', e);
-		}
+	function destroyTurnstileWidget() {
+		const widgetId = turnstileWidgetId;
+		turnstileWidgetId = null;
+		renderedTurnstileSiteKey = '';
+		turnstileToken = '';
+		removeTurnstile(widgetId);
 	}
 
-	function doRenderTurnstile() {
-		if (!turnstileLoaded || !turnstileSiteKey) return;
+	async function ensureTurnstileWidget() {
+		const siteKey = turnstileSiteKey;
+		if (
+			requireTurnstile &&
+			turnstileWidgetId &&
+			renderedTurnstileSiteKey === siteKey &&
+			turnstileContainerRef?.isConnected
+		) {
+			return;
+		}
+		const generation = ++turnstileGeneration;
+		turnstileLoadFailed = false;
+		if (!requireTurnstile || !siteKey) {
+			destroyTurnstileWidget();
+			turnstileToken = '';
+			return;
+		}
 
-		turnstileWidgetId = renderTurnstile(
-			'turnstile-container',
-			turnstileSiteKey,
-			{
-				onSuccess: (token) => {
-					turnstileToken = token;
+		try {
+			await loadTurnstileScript();
+			await tick();
+			const container = turnstileContainerRef;
+			if (
+				generation !== turnstileGeneration ||
+				!requireTurnstile ||
+				turnstileSiteKey !== siteKey ||
+				!container?.isConnected
+			) {
+				return;
+			}
+			if (turnstileWidgetId && renderedTurnstileSiteKey === siteKey) return;
+
+			destroyTurnstileWidget();
+			const widgetId = renderTurnstile(
+				container,
+				siteKey,
+				{
+					onSuccess: (token) => {
+						if (generation !== turnstileGeneration) return;
+						turnstileToken = token;
+						error = '';
+					},
+					onExpired: () => {
+						if (generation === turnstileGeneration) turnstileToken = '';
+					},
+					onError: (message) => {
+						if (generation !== turnstileGeneration) return;
+						turnstileToken = '';
+						error = message;
+					}
 				},
-				onExpired: () => {
-					turnstileToken = '';
-				},
-				onError: (message) => {
-					turnstileToken = '';
-					error = message;
-				}
-			},
-			turnstileWidgetId
-		);
+				'admin-auth'
+			);
+			if (!widgetId) throw new Error('Failed to render Turnstile');
+			if (generation !== turnstileGeneration) {
+				removeTurnstile(widgetId);
+				return;
+			}
+			turnstileWidgetId = widgetId;
+			renderedTurnstileSiteKey = siteKey;
+		} catch {
+			if (generation === turnstileGeneration) turnstileLoadFailed = true;
+		}
 	}
 
 	function doResetTurnstile() {
@@ -85,8 +122,34 @@
 		turnstileToken = '';
 	}
 
+	function applyTurnstileState(
+		state: { requireTurnstile?: boolean; siteKey?: string } | undefined,
+		resetExistingWidget = false
+	) {
+		if (typeof state?.requireTurnstile !== 'boolean') return;
+		const nextSiteKey = state.requireTurnstile ? state.siteKey || '' : '';
+		const canResetExistingWidget =
+			resetExistingWidget &&
+			state.requireTurnstile &&
+			Boolean(turnstileWidgetId) &&
+			renderedTurnstileSiteKey === nextSiteKey;
+
+		requireTurnstile = state.requireTurnstile;
+		turnstileSiteKey = nextSiteKey;
+		if (canResetExistingWidget) {
+			doResetTurnstile();
+		} else if (requireTurnstile) {
+			void ensureTurnstileWidget();
+		} else {
+			turnstileGeneration += 1;
+			destroyTurnstileWidget();
+			turnstileToken = '';
+		}
+	}
+
 	// 登录验证
 	async function handleLogin() {
+		if (loading) return;
 		if (!password) {
 			error = '请输入密码';
 			return;
@@ -111,20 +174,12 @@
 			});
 
 			const data: ApiResponse<LoginResponse> = await res.json();
-			if (data.success && data.data?.token) {
-				localStorage.setItem('admin_token', data.data.token);
+			if (data.success && data.data?.authenticated === true) {
 				onLoginSuccess();
 			} else {
 				error = data.error || '密码错误';
-
-				// 检查是否需要启用 Turnstile
-				if (data.data?.requireTurnstile && data.data?.siteKey) {
-					requireTurnstile = true;
-					turnstileSiteKey = data.data.siteKey;
-					loadTurnstileScript(() => {
-						turnstileLoaded = true;
-						setTimeout(() => doRenderTurnstile(), 100);
-					});
+				if (typeof data.data?.requireTurnstile === 'boolean') {
+					applyTurnstileState(data.data, true);
 				} else if (requireTurnstile) {
 					doResetTurnstile();
 				}
@@ -139,9 +194,28 @@
 		}
 	}
 
-	// 初始化时检查 Turnstile 状态
+	// 页面打开时先预加载脚本；只有失败阈值已达到时才创建 widget。
 	$effect(() => {
-		checkTurnstileRequired();
+		preloadTurnstileScript();
+	});
+
+	// 如果该 IP 进入页面前已经达到阈值，复用状态检查结果，避免再提交一次才显示验证。
+	$effect(() => {
+		if (
+			initialTurnstileRequired &&
+			initialTurnstileSiteKey &&
+			(!requireTurnstile || turnstileSiteKey !== initialTurnstileSiteKey)
+		) {
+			applyTurnstileState({
+				requireTurnstile: true,
+				siteKey: initialTurnstileSiteKey
+			});
+		}
+	});
+
+	onDestroy(() => {
+		turnstileGeneration += 1;
+		destroyTurnstileWidget();
 	});
 </script>
 
@@ -172,13 +246,21 @@
 					bind:value={password}
 					placeholder="输入管理密码"
 					autocomplete="current-password"
+					oninput={() => {
+						if (error) error = '';
+					}}
 				/>
 			</div>
 
 			{#if requireTurnstile}
 				<div class="turnstile-wrapper">
-					<div id="turnstile-container"></div>
-					{#if !turnstileToken}
+					<div bind:this={turnstileContainerRef}></div>
+					{#if turnstileLoadFailed}
+						<p class="turnstile-hint">人机验证暂时无法加载</p>
+						<button type="button" class="admin-btn" onclick={() => void ensureTurnstileWidget()}>
+							重新加载验证
+						</button>
+					{:else if !turnstileToken}
 						<p class="turnstile-hint">🤖 请完成人机验证</p>
 					{:else}
 						<p class="turnstile-success">✅ 验证通过</p>

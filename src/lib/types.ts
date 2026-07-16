@@ -49,6 +49,33 @@ export interface RustDeskConfig {
 }
 
 /**
+ * 外部下载链接在 R2 中的备份状态。
+ *
+ * 状态单独存储在 R2 JSON 对象中，仅在管理员读取下载列表时合并到下载项，
+ * 避免后台同步任务改写整份下载列表。
+ */
+export interface R2BackupState {
+	status: 'pending' | 'syncing' | 'ready' | 'failed';
+	/** 本次备份对应的源地址，用来避免 URL 修改后误用旧备份 */
+	sourceUrl: string;
+	/** 区分重复/并发同步，防止旧任务覆盖较新的状态 */
+	operationId: string;
+	/** 当前同步任务写入的 R2 对象键 */
+	objectKey?: string;
+	/** 新备份就绪后清理；同源刷新失败时可继续作为有效兜底 */
+	previousBackup?: {
+		objectKey: string;
+		sourceUrl: string;
+		syncedAt?: number;
+		size?: number;
+	};
+	updatedAt: number;
+	syncedAt?: number;
+	size?: number;
+	error?: string;
+}
+
+/**
  * 下载项
  */
 export interface DownloadItem {
@@ -83,6 +110,36 @@ export interface DownloadItem {
 	enabled: boolean;
 	/** 下载次数（可选，默认为 0） */
 	downloadCount?: number;
+	/** R2 外链备份状态（仅管理员接口临时合并，不写入下载列表） */
+	r2Backup?: R2BackupState;
+}
+
+/**
+ * 匿名下载列表只能读取的展示字段。
+ * 真实 URL、配置指引和存储配置必须在密码验证成功后单独返回。
+ */
+export type PublicDownloadItem = Pick<
+	DownloadItem,
+	| 'id'
+	| 'platform'
+	| 'categoryId'
+	| 'title'
+	| 'description'
+	| 'filename'
+	| 'version'
+	| 'size'
+	| 'storageType'
+	| 'enabled'
+> & {
+	/** 独立 KV key 中保存的下载次数 */
+	downloadCount: number;
+};
+
+export interface PublicDownloadList {
+	items: PublicDownloadItem[];
+	/** 所有已启用下载项的下载次数之和 */
+	downloadCount: number;
+	lastUpdated: number;
 }
 
 /**

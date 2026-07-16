@@ -14,11 +14,7 @@ import { dedupeChannels } from './utils.ts';
 export type MumbleClientMode = 'interactive' | 'monitor';
 export type MumbleAudioPermission = 'unknown' | 'granted' | 'denied' | 'unsupported';
 export type MumbleConnectionStatus =
-	| 'idle'
-	| 'connecting'
-	| 'connected'
-	| 'reconnecting'
-	| 'disconnected';
+	'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 export interface MumbleClientSnapshot {
 	status: MumbleConnectionStatus;

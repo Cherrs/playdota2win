@@ -3,10 +3,10 @@ import test from 'node:test';
 
 import { getMumbleProxyConfig, getMumbleProxyHealthUrl } from './config.ts';
 
-test('derives proxy endpoints from the request URL when env vars are missing', () => {
+test('derives proxy endpoints from the request URL when env vars are missing', async () => {
 	const requestUrl = new URL('http://playdota2.win/download');
 
-	assert.deepEqual(getMumbleProxyConfig(undefined, requestUrl), {
+	assert.deepEqual(await getMumbleProxyConfig(undefined, requestUrl), {
 		wsUrl: 'ws://playdota2.win:8080/ws',
 		iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 		healthUrl: 'http://playdota2.win:8080/health'
@@ -14,10 +14,10 @@ test('derives proxy endpoints from the request URL when env vars are missing', (
 	assert.equal(getMumbleProxyHealthUrl(undefined, requestUrl), 'http://playdota2.win:8080/health');
 });
 
-test('uses secure proxy endpoints for https request URLs', () => {
+test('uses secure proxy endpoints for https request URLs', async () => {
 	const requestUrl = new URL('https://playdota2.win/admin');
 
-	assert.deepEqual(getMumbleProxyConfig(undefined, requestUrl), {
+	assert.deepEqual(await getMumbleProxyConfig(undefined, requestUrl), {
 		wsUrl: 'wss://playdota2.win:8080/ws',
 		iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 		healthUrl: 'https://playdota2.win:8080/health'
@@ -25,7 +25,7 @@ test('uses secure proxy endpoints for https request URLs', () => {
 	assert.equal(getMumbleProxyHealthUrl(undefined, requestUrl), 'https://playdota2.win:8080/health');
 });
 
-test('ignores invalid STUN server URLs from env', () => {
+test('ignores invalid STUN server URLs from env', async () => {
 	const requestUrl = new URL('https://playdota2.win/download');
 	const platform = {
 		env: {
@@ -34,14 +34,14 @@ test('ignores invalid STUN server URLs from env', () => {
 		}
 	} as App.Platform;
 
-	assert.deepEqual(getMumbleProxyConfig(platform, requestUrl), {
+	assert.deepEqual(await getMumbleProxyConfig(platform, requestUrl), {
 		wsUrl: 'wss://playdota2.win:8080/ws',
-		iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'turns:turn.example.com:5349?transport=tcp' }],
+		iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
 		healthUrl: 'https://playdota2.win:8080/health'
 	});
 });
 
-test('falls back to the default STUN server when env only contains invalid URLs', () => {
+test('falls back to the default STUN server when env only contains invalid URLs', async () => {
 	const requestUrl = new URL('https://playdota2.win/download');
 	const platform = {
 		env: {
@@ -49,52 +49,67 @@ test('falls back to the default STUN server when env only contains invalid URLs'
 		}
 	} as App.Platform;
 
-	assert.deepEqual(getMumbleProxyConfig(platform, requestUrl), {
+	assert.deepEqual(await getMumbleProxyConfig(platform, requestUrl), {
 		wsUrl: 'wss://playdota2.win:8080/ws',
 		iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 		healthUrl: 'https://playdota2.win:8080/health'
 	});
 });
 
-test('attaches TURN credentials only to turn/turns URLs', () => {
+test('attaches long-lived TURN credentials only to turn/turns URLs', async () => {
 	const requestUrl = new URL('https://playdota2.win/download');
 	const platform = {
 		env: {
 			MUMBLE_PROXY_STUN_SERVERS:
 				'stun:stun.l.google.com:19302, turn:turn.example.com:3478, turns:turn.example.com:5349',
-			MUMBLE_PROXY_TURN_USERNAME: 'myuser',
-			MUMBLE_PROXY_TURN_CREDENTIAL: 'mypassword'
+			MUMBLE_PROXY_TURN_USERNAME: 'turn-user',
+			MUMBLE_PROXY_TURN_CREDENTIAL: 'turn-password'
 		}
 	} as App.Platform;
 
-	assert.deepEqual(getMumbleProxyConfig(platform, requestUrl), {
+	assert.deepEqual(await getMumbleProxyConfig(platform, requestUrl), {
 		wsUrl: 'wss://playdota2.win:8080/ws',
 		iceServers: [
 			{ urls: 'stun:stun.l.google.com:19302' },
-			{ urls: 'turn:turn.example.com:3478', username: 'myuser', credential: 'mypassword' },
-			{ urls: 'turns:turn.example.com:5349', username: 'myuser', credential: 'mypassword' }
+			{
+				urls: 'turn:turn.example.com:3478',
+				username: 'turn-user',
+				credential: 'turn-password'
+			},
+			{
+				urls: 'turns:turn.example.com:5349',
+				username: 'turn-user',
+				credential: 'turn-password'
+			}
 		],
 		healthUrl: 'https://playdota2.win:8080/health'
 	});
 });
 
-test('omits credentials when only username is set', () => {
+test('omits unusable TURN servers when long-lived credentials are incomplete', async () => {
 	const requestUrl = new URL('https://playdota2.win/download');
-	const platform = {
-		env: {
-			MUMBLE_PROXY_STUN_SERVERS: 'turn:turn.example.com:3478',
-			MUMBLE_PROXY_TURN_USERNAME: 'myuser'
+	for (const env of [
+		{
+			MUMBLE_PROXY_STUN_SERVERS: 'stun:stun.example.com:3478, turn:turn.example.com:3478'
+		},
+		{
+			MUMBLE_PROXY_STUN_SERVERS: 'stun:stun.example.com:3478, turn:turn.example.com:3478',
+			MUMBLE_PROXY_TURN_USERNAME: 'turn-user'
+		},
+		{
+			MUMBLE_PROXY_STUN_SERVERS: 'stun:stun.example.com:3478, turn:turn.example.com:3478',
+			MUMBLE_PROXY_TURN_CREDENTIAL: 'turn-password'
 		}
-	} as App.Platform;
-
-	assert.deepEqual(getMumbleProxyConfig(platform, requestUrl), {
-		wsUrl: 'wss://playdota2.win:8080/ws',
-		iceServers: [{ urls: 'turn:turn.example.com:3478' }],
-		healthUrl: 'https://playdota2.win:8080/health'
-	});
+	]) {
+		assert.deepEqual(await getMumbleProxyConfig({ env } as App.Platform, requestUrl), {
+			wsUrl: 'wss://playdota2.win:8080/ws',
+			iceServers: [{ urls: 'stun:stun.example.com:3478' }],
+			healthUrl: 'https://playdota2.win:8080/health'
+		});
+	}
 });
 
-test('rejects loopback proxy endpoints for public browser requests', () => {
+test('rejects loopback proxy endpoints for public browser requests', async () => {
 	const requestUrl = new URL('https://playdota2.win/download');
 	const platform = {
 		env: {
@@ -103,6 +118,6 @@ test('rejects loopback proxy endpoints for public browser requests', () => {
 		}
 	} as App.Platform;
 
-	assert.equal(getMumbleProxyConfig(platform, requestUrl), null);
+	assert.equal(await getMumbleProxyConfig(platform, requestUrl), null);
 	assert.equal(getMumbleProxyHealthUrl(platform, requestUrl), null);
 });

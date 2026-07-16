@@ -1,8 +1,9 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { signDownloadPath } from '$lib/admin-auth';
+import { readDownloadList } from '$lib/server/download-list-store';
+import { getManagedUploadKey } from '$lib/server/download-object';
+import { extractVersion } from '$lib/utils/parseFilename';
 import type { DownloadItem, DownloadList } from '$lib/types';
-
-const KV_KEY = 'downloads_list';
 
 const corsHeaders = {
 	'Access-Control-Allow-Origin': '*',
@@ -13,6 +14,7 @@ const corsHeaders = {
 
 interface RustDeskPublicConfig {
 	downloadUrl: string;
+	version: string;
 	idServer: string;
 	key: string;
 }
@@ -34,11 +36,38 @@ async function resolveDownloadUrl(
 ): Promise<string> {
 	let url = item.url;
 
-	if (item.storageType === 'r2' && item.url.startsWith('/api/admin/download/') && signingSecret) {
+	if (item.storageType === 'r2') {
+		if (!getManagedUploadKey(item.url, item.platform) || !signingSecret) {
+			throw new Error('Managed R2 download is not configured safely');
+		}
 		url = await signDownloadPath(item.url, signingSecret);
 	}
 
-	return new URL(url, origin).toString();
+	const resolved = new URL(url, origin);
+	if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+		throw new Error('RustDesk download URL must use HTTP(S)');
+	}
+	return resolved.toString();
+}
+
+function resolveVersion(item: DownloadItem, downloadUrl: string): string {
+	const storedVersion = typeof item.version === 'string' ? item.version.trim() : '';
+	if (storedVersion) {
+		return storedVersion;
+	}
+
+	const candidates = [item.filename, item.url, downloadUrl].filter(
+		(value): value is string => typeof value === 'string' && value.trim().length > 0
+	);
+
+	for (const candidate of candidates) {
+		const version = extractVersion(candidate);
+		if (version) {
+			return version;
+		}
+	}
+
+	return '';
 }
 
 export const OPTIONS: RequestHandler = async () => {
@@ -50,13 +79,13 @@ export const OPTIONS: RequestHandler = async () => {
 
 export const GET: RequestHandler = async ({ platform, request }) => {
 	try {
-		const kv = platform?.env.APP_KV;
-		if (!kv) {
-			return json({ error: 'KV not available' }, { status: 500, headers: corsHeaders });
+		const kv = platform?.env?.APP_KV;
+		const r2 = platform?.env?.UPLOADS_BUCKET;
+		if (!kv && !r2) {
+			return json({ error: 'Storage not available' }, { status: 500, headers: corsHeaders });
 		}
 
-		const data = await kv.get<DownloadList>(KV_KEY, 'json');
-		const list = data || { items: [], downloadCount: 0, lastUpdated: Date.now() };
+		const { list } = await readDownloadList(kv, r2);
 		const item = findRustDeskItem(list);
 
 		if (!item?.rustdeskConfig) {
@@ -67,11 +96,12 @@ export const GET: RequestHandler = async ({ platform, request }) => {
 		}
 
 		const origin = new URL(request.url).origin;
-		const downloadUrl = await resolveDownloadUrl(item, origin, platform?.env.ADMIN_SIGNING_SECRET);
+		const downloadUrl = await resolveDownloadUrl(item, origin, platform?.env?.ADMIN_SIGNING_SECRET);
 
 		return json(
 			{
 				downloadUrl,
+				version: resolveVersion(item, downloadUrl),
 				idServer: item.rustdeskConfig.idServer,
 				key: item.rustdeskConfig.key
 			} satisfies RustDeskPublicConfig,

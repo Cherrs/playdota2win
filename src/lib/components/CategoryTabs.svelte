@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { Category, DownloadItem } from '$lib/types';
+	import type { Category, PublicDownloadItem } from '$lib/types';
 
 	interface Props {
 		categories: Category[];
-		downloads: DownloadItem[];
+		downloads: PublicDownloadItem[];
 		selectedCategoryId: string | null;
 		onSelect: (categoryId: string | null) => void;
 	}

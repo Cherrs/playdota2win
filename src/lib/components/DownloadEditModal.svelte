@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { DownloadItem, ApiResponse, Platform, Category } from '$lib/types';
 	import { trapFocus, focusFirstElement } from '$lib/utils/a11y';
 	import { parseDownloadFileInfo } from '$lib/utils/parseFilename';
@@ -19,6 +20,9 @@
 
 	let saving = $state(false);
 	let error = $state('');
+	let activeItemId = '';
+	let saveController: AbortController | null = null;
+	let closed = false;
 
 	// 表单状态 - 通过 $effect 初始化以避免警告
 	let formPlatform = $state<Platform>('windows');
@@ -36,6 +40,14 @@
 
 	// 当 item 变化时重新初始化表单
 	$effect(() => {
+		if (activeItemId !== item.id) {
+			saveController?.abort();
+			saveController = null;
+			saving = false;
+			error = '';
+			closed = false;
+			activeItemId = item.id;
+		}
 		formPlatform = item.platform;
 		formTitle = item.title || '';
 		formDescription = item.description || '';
@@ -48,6 +60,20 @@
 		formRustDeskEnabled = item.rustdeskConfig?.enabled === true;
 		formRustDeskIdServer = item.rustdeskConfig?.idServer || '';
 		formRustDeskKey = item.rustdeskConfig?.key || '';
+	});
+
+	function handleClose(): void {
+		if (closed) return;
+		closed = true;
+		saveController?.abort();
+		saveController = null;
+		saving = false;
+		onClose();
+	}
+
+	onDestroy(() => {
+		closed = true;
+		saveController?.abort();
 	});
 
 	function applyParsedFileInfo(input: string, updateFilename: boolean) {
@@ -75,6 +101,7 @@
 	}
 
 	async function handleSave() {
+		if (saving) return;
 		if (!formVersion || !formSize) {
 			error = '请填写版本和大小';
 			return;
@@ -88,13 +115,16 @@
 			return;
 		}
 
+		const itemId = item.id;
+		const controller = new AbortController();
+		saveController?.abort();
+		saveController = controller;
 		saving = true;
 		error = '';
 
 		try {
-			const token = localStorage.getItem('admin_token');
 			const payload = {
-				id: item.id,
+				id: itemId,
 				platform: formPlatform,
 				categoryId: formCategoryId || '',
 				title: formTitle.trim(),
@@ -103,7 +133,7 @@
 				filename: formFilename.trim(),
 				version: formVersion.trim(),
 				size: formSize.trim(),
-				url: formUrl.trim(),
+				...(item.storageType === 'r2' ? {} : { url: formUrl.trim() }),
 				rustdeskConfig: {
 					enabled: formRustDeskEnabled,
 					idServer: formRustDeskIdServer.trim(),
@@ -113,24 +143,27 @@
 
 			const res = await fetch('/api/admin', {
 				method: 'PUT',
-				headers: {
-					'Content-Type': 'application/json',
-					...(token ? { Authorization: `Bearer ${token}` } : {})
-				},
-				body: JSON.stringify(payload)
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload),
+				signal: controller.signal
 			});
 
 			const data: ApiResponse<DownloadItem> = await res.json();
-			if (data.success && data.data) {
+			if (closed || controller.signal.aborted || item.id !== itemId) return;
+			if (res.ok && data.success && data.data) {
 				onSave(data.data);
-				onClose();
+				handleClose();
 			} else {
 				error = data.error || '更新失败';
 			}
-		} catch {
-			error = '网络错误';
+		} catch (caught) {
+			if (caught instanceof DOMException && caught.name === 'AbortError') return;
+			if (!closed && saveController === controller) error = '网络错误';
 		} finally {
-			saving = false;
+			if (!closed && saveController === controller) {
+				saveController = null;
+				saving = false;
+			}
 		}
 	}
 	$effect(() => {
@@ -139,7 +172,7 @@
 		void focusFirstElement(dialogRef, closeButtonRef);
 		const handleKeydown = (event: KeyboardEvent) => {
 			if (event.key === 'Escape') {
-				onClose();
+				handleClose();
 			}
 		};
 		document.addEventListener('keydown', handleKeydown);
@@ -151,11 +184,25 @@
 </script>
 
 <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-	<button type="button" class="modal-scrim" onclick={onClose} aria-label="关闭"></button>
-	<div class="modal-card modal-lg" bind:this={dialogRef} use:trapFocus tabindex="-1">
+	<button type="button" class="modal-scrim" onclick={handleClose} aria-label="关闭编辑表单"
+	></button>
+	<div
+		class="modal-card modal-lg"
+		bind:this={dialogRef}
+		use:trapFocus
+		tabindex="-1"
+		aria-busy={saving}
+		aria-describedby={error ? errorId : undefined}
+	>
 		<div class="modal-header">
 			<h3 id={titleId}>编辑下载项</h3>
-			<button type="button" class="modal-close" onclick={onClose} bind:this={closeButtonRef}>
+			<button
+				type="button"
+				class="modal-close"
+				onclick={handleClose}
+				bind:this={closeButtonRef}
+				aria-label="关闭编辑表单"
+			>
 				×
 			</button>
 		</div>
@@ -167,7 +214,8 @@
 		<div class="auth-form modal-form-grid">
 			<div class="form-group full-width">
 				<p class="field-hint">
-					可修改展示信息和下载地址；如需更换存储方式或重新上传文件，请重新添加下载项。
+					可修改展示信息和下载地址；外部链接变更后会重新同步 R2
+					备份。如需更换存储方式或重新上传文件，请重新添加下载项。
 				</p>
 			</div>
 			<div class="form-group">
@@ -228,10 +276,13 @@
 					type="text"
 					bind:value={formUrl}
 					oninput={handleUrlChange}
+					readonly={item.storageType === 'r2'}
 					placeholder="https://example.com/download.exe 或 /api/admin/download/..."
 				/>
 				<p class="field-hint">
-					外部链接、R2 内部路径或中转地址均可；保存后用户下载会使用这个地址。
+					{item.storageType === 'r2'
+						? 'R2 对象路径由上传流程生成且不可编辑；更换文件请重新添加下载项。'
+						: '仅支持公网 HTTP(S) 地址；外部链接不可用时可手动选择 R2 备份。'}
 				</p>
 			</div>
 
@@ -257,7 +308,8 @@
 					<span>作为 RustDesk 配置接口数据源</span>
 				</label>
 				<p class="field-hint">
-					开启后，公开接口 /api/rustdesk 会返回此下载项的下载链接、ID 服务器和 key。
+					开启后，公开的 /api/rustdesk 接口会返回此下载项的下载链接、版本号、ID 服务器和
+					key，调用时无需授权。
 				</p>
 
 				{#if formRustDeskEnabled}
@@ -286,7 +338,7 @@
 		</div>
 
 		<div class="modal-footer">
-			<button type="button" class="btn btn-secondary" onclick={onClose}>取消</button>
+			<button type="button" class="btn btn-secondary" onclick={handleClose}>取消</button>
 			<button type="button" class="btn btn-primary" onclick={handleSave} disabled={saving}>
 				{#if saving}
 					<span class="spinner"></span> 保存中...
@@ -416,6 +468,9 @@
 	.form-group input,
 	.form-group select,
 	.form-group textarea {
+		box-sizing: border-box;
+		min-width: 0;
+		width: 100%;
 		padding: 0.75rem 1rem;
 		border: 2px solid #e6e0f0;
 		border-radius: 12px;
@@ -521,6 +576,37 @@
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+
+	@media (max-width: 640px) {
+		.modal-backdrop {
+			align-items: flex-end;
+			padding: 0.5rem;
+		}
+
+		.modal-card {
+			box-sizing: border-box;
+			max-height: calc(100dvh - 1rem);
+			padding: 1rem;
+		}
+
+		.modal-form-grid,
+		.rustdesk-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.modal-footer {
+			flex-wrap: wrap;
+		}
+
+		.modal-footer .btn {
+			flex: 1;
+			justify-content: center;
+		}
+
+		.field-hint {
+			overflow-wrap: anywhere;
 		}
 	}
 

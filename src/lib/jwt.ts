@@ -1,4 +1,10 @@
 const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: true });
+const JWT_ALGORITHM = 'HS256';
+const JWT_TYPE = 'JWT';
+const MAX_JWT_LENGTH = 4096;
+const CLOCK_SKEW_SECONDS = 60;
+const MAX_TOKEN_LIFETIME_SECONDS = 60 * 60;
 
 function base64UrlEncode(input: Uint8Array): string {
 	let binary = '';
@@ -13,23 +19,34 @@ function base64UrlEncodeJson(obj: object): string {
 	return base64UrlEncode(encoder.encode(JSON.stringify(obj)));
 }
 
-function base64UrlDecodeToString(input: string): string {
+function base64UrlDecode(input: string): Uint8Array<ArrayBuffer> {
+	if (!input || !/^[A-Za-z0-9_-]+$/.test(input) || input.length % 4 === 1) {
+		throw new Error('Invalid base64url value');
+	}
 	const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4));
 	const b64 = input.replace(/-/g, '+').replace(/_/g, '/') + pad;
 	const binary = atob(b64);
 	const bytes = new Uint8Array(binary.length);
 	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-	return new TextDecoder().decode(bytes);
+	return bytes;
 }
 
-async function hmacSha256(secret: string, data: string): Promise<Uint8Array> {
-	const key = await crypto.subtle.importKey(
+function base64UrlDecodeJson(input: string): unknown {
+	return JSON.parse(decoder.decode(base64UrlDecode(input)));
+}
+
+async function importHmacKey(secret: string): Promise<CryptoKey> {
+	return crypto.subtle.importKey(
 		'raw',
 		encoder.encode(secret),
 		{ name: 'HMAC', hash: 'SHA-256' },
 		false,
 		['sign', 'verify']
 	);
+}
+
+async function hmacSha256(secret: string, data: string): Promise<Uint8Array<ArrayBuffer>> {
+	const key = await importHmacKey(secret);
 	const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
 	return new Uint8Array(signature);
 }
@@ -48,16 +65,55 @@ export async function verifyJwt(
 	token: string,
 	secret: string
 ): Promise<{ valid: boolean; payload?: Record<string, unknown> }> {
-	const parts = token.split('.');
-	if (parts.length !== 3) return { valid: false };
-	const [headerPart, payloadPart, signaturePart] = parts;
-	const data = `${headerPart}.${payloadPart}`;
-	const expected = await hmacSha256(secret, data);
-	const expectedPart = base64UrlEncode(expected);
-	if (expectedPart !== signaturePart) return { valid: false };
+	if (!token || token.length > MAX_JWT_LENGTH || !secret) return { valid: false };
 
-	const payloadJson = base64UrlDecodeToString(payloadPart);
-	const payload = JSON.parse(payloadJson);
-	if (typeof payload?.exp === 'number' && Date.now() > payload.exp) return { valid: false };
-	return { valid: true, payload };
+	try {
+		const parts = token.split('.');
+		if (parts.length !== 3) return { valid: false };
+		const [headerPart, payloadPart, signaturePart] = parts;
+		const header = base64UrlDecodeJson(headerPart);
+		if (
+			typeof header !== 'object' ||
+			header === null ||
+			Array.isArray(header) ||
+			Object.keys(header).length !== 2 ||
+			(header as Record<string, unknown>).alg !== JWT_ALGORITHM ||
+			(header as Record<string, unknown>).typ !== JWT_TYPE
+		) {
+			return { valid: false };
+		}
+
+		const key = await importHmacKey(secret);
+		const signature = base64UrlDecode(signaturePart);
+		const data = encoder.encode(`${headerPart}.${payloadPart}`);
+		if (!(await crypto.subtle.verify('HMAC', key, signature, data))) return { valid: false };
+
+		const decodedPayload = base64UrlDecodeJson(payloadPart);
+		if (
+			typeof decodedPayload !== 'object' ||
+			decodedPayload === null ||
+			Array.isArray(decodedPayload)
+		) {
+			return { valid: false };
+		}
+		const payload = decodedPayload as Record<string, unknown>;
+		const { sub, iat, exp } = payload;
+		if (
+			sub !== 'admin' ||
+			!Number.isSafeInteger(iat) ||
+			!Number.isSafeInteger(exp) ||
+			(exp as number) <= (iat as number) ||
+			(exp as number) - (iat as number) > MAX_TOKEN_LIFETIME_SECONDS
+		) {
+			return { valid: false };
+		}
+
+		const now = Math.floor(Date.now() / 1000);
+		if ((iat as number) > now + CLOCK_SKEW_SECONDS || (exp as number) <= now) {
+			return { valid: false };
+		}
+		return { valid: true, payload };
+	} catch {
+		return { valid: false };
+	}
 }

@@ -1,11 +1,11 @@
 <script lang="ts">
-	import type { DownloadItem, Platform } from '$lib/types';
+	import type { Platform, PublicDownloadItem } from '$lib/types';
 
 	interface Props {
-		item: DownloadItem;
+		item: PublicDownloadItem;
 		downloading?: boolean;
-		onDownload: (item: DownloadItem) => void;
-		onGuide: (item: DownloadItem) => void;
+		onDownload: (item: PublicDownloadItem) => void;
+		onGuide: (item: PublicDownloadItem) => void;
 	}
 
 	let { item, downloading = false, onDownload, onGuide }: Props = $props();
@@ -48,7 +48,12 @@
 		<button class="card-btn btn-outline" onclick={() => onGuide(item)} type="button">
 			配置指引
 		</button>
-		<button class="card-btn btn-primary" onclick={() => onDownload(item)} disabled={downloading}>
+		<button
+			class="card-btn btn-primary"
+			type="button"
+			onclick={() => onDownload(item)}
+			disabled={downloading}
+		>
 			<span>立即下载</span>
 			<span class="btn-arrow">→</span>
 		</button>
@@ -107,6 +112,7 @@
 		font-size: 1.05rem;
 		color: #2d1b4e;
 		margin: 0;
+		overflow-wrap: anywhere;
 	}
 
 	.card-meta {
@@ -180,5 +186,33 @@
 		cursor: not-allowed;
 		transform: none;
 		box-shadow: none;
+	}
+
+	.card-btn:focus-visible {
+		outline: 3px solid rgba(107, 76, 154, 0.28);
+		outline-offset: 2px;
+	}
+
+	@media (max-width: 390px) {
+		.download-card {
+			padding: 1rem;
+		}
+
+		.card-actions {
+			flex-direction: column;
+			gap: 0.6rem;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.download-card,
+		.card-btn {
+			transition: none;
+		}
+
+		.download-card:hover,
+		.card-btn:hover {
+			transform: none;
+		}
 	}
 </style>

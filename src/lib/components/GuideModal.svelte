@@ -1,15 +1,16 @@
 <script lang="ts">
-	import type { DownloadItem, Platform } from '$lib/types';
+	import type { Platform, PublicDownloadItem } from '$lib/types';
 	import { parseMarkdown } from '$lib/utils/markdown';
 	import { trapFocus, focusFirstElement } from '$lib/utils/a11y';
 
 	interface Props {
-		item: DownloadItem;
+		item: PublicDownloadItem;
+		configGuide: string;
 		onClose: () => void;
 	}
 
-	let { item, onClose }: Props = $props();
-	let parsedGuide = $derived(item.configGuide ? parseMarkdown(item.configGuide) : '');
+	let { item, configGuide, onClose }: Props = $props();
+	let parsedGuide = $derived(configGuide ? parseMarkdown(configGuide) : '');
 	let dialogRef = $state<HTMLDivElement | null>(null);
 	let closeButtonRef = $state<HTMLButtonElement | null>(null);
 	let lastFocusedElement: HTMLElement | null = null;
@@ -46,11 +47,17 @@
 </script>
 
 <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-	<button type="button" class="modal-scrim" onclick={onClose} aria-label="关闭"></button>
+	<button type="button" class="modal-scrim" onclick={onClose} aria-label="关闭配置指引"></button>
 	<div class="modal-card modal-lg" bind:this={dialogRef} use:trapFocus tabindex="-1">
 		<div class="modal-header">
 			<h3 id={titleId}>📖 配置指引</h3>
-			<button class="modal-close" onclick={onClose} type="button" bind:this={closeButtonRef}>
+			<button
+				class="modal-close"
+				onclick={onClose}
+				type="button"
+				bind:this={closeButtonRef}
+				aria-label="关闭配置指引"
+			>
 				×
 			</button>
 		</div>
@@ -58,7 +65,7 @@
 			{item.title || `${getPlatformLabel(item.platform)} 版本`}
 		</p>
 		<div class="guide-content-scroll">
-			{#if item.configGuide}
+			{#if configGuide}
 				<div class="markdown-body">
 					{@html parsedGuide}
 				</div>
@@ -103,6 +110,7 @@
 	}
 
 	.modal-card {
+		box-sizing: border-box;
 		width: 100%;
 		max-width: 420px;
 		background: rgba(255, 255, 255, 0.95);
@@ -275,6 +283,21 @@
 		.modal-btn:hover {
 			transform: none;
 			box-shadow: none;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.modal-backdrop {
+			padding: 0.5rem;
+		}
+
+		.modal-card {
+			padding: 1rem;
+			max-height: calc(100dvh - 1rem);
+		}
+
+		.markdown-body {
+			overflow-wrap: anywhere;
 		}
 	}
 </style>

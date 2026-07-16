@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Category, ApiResponse } from '$lib/types';
+	import { onDestroy } from 'svelte';
+	import type { Category, ApiResponse, CategoryList } from '$lib/types';
 	import EmojiPicker from '$lib/components/EmojiPicker.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import DraggableList from '$lib/components/DraggableList.svelte';
@@ -21,6 +22,7 @@
 
 	let loading = $state(false);
 	let saving = $state(false);
+	let reordering = $state(false);
 	let error = $state('');
 	let success = $state('');
 	let showForm = $state(false);
@@ -35,8 +37,22 @@
 	let dialogRef = $state<HTMLDivElement | null>(null);
 	let closeButtonRef = $state<HTMLButtonElement | null>(null);
 	let lastFocusedElement: HTMLElement | null = null;
+	let formSession = 0;
+	let saveController: AbortController | null = null;
 	const titleId = crypto.randomUUID();
 	const errorId = crypto.randomUUID();
+
+	onDestroy(() => {
+		formSession += 1;
+		saveController?.abort();
+	});
+
+	function beginFormSession(): void {
+		formSession += 1;
+		saveController?.abort();
+		saveController = null;
+		saving = false;
+	}
 
 	// 计算每个分类的下载数量
 	function getCategoryDownloadCount(categoryId: string): number {
@@ -45,6 +61,7 @@
 
 	// 打开分类表单
 	function openForm(category?: Category) {
+		beginFormSession();
 		if (category) {
 			editingId = category.id;
 			formName = category.name;
@@ -68,6 +85,7 @@
 	}
 
 	function closeForm() {
+		beginFormSession();
 		showForm = false;
 		editingId = null;
 		formName = '';
@@ -103,15 +121,20 @@
 			return;
 		}
 
+		if (saving) return;
+
+		const session = formSession;
+		const targetEditingId = editingId;
+		const controller = new AbortController();
+		saveController = controller;
 		saving = true;
 		error = '';
 
 		try {
-			const token = localStorage.getItem('admin_token');
-			const method = editingId ? 'PUT' : 'POST';
-			const body = editingId
+			const method = targetEditingId ? 'PUT' : 'POST';
+			const body = targetEditingId
 				? JSON.stringify({
-						id: editingId,
+						id: targetEditingId,
 						name: formName.trim(),
 						icon: formIcon.trim() || undefined,
 						color: formColor.trim() || undefined,
@@ -128,17 +151,16 @@
 
 			const res = await fetch('/api/admin/categories', {
 				method,
-				headers: {
-					'Content-Type': 'application/json',
-					...(token ? { Authorization: `Bearer ${token}` } : {})
-				},
-				body
+				headers: { 'Content-Type': 'application/json' },
+				body,
+				signal: controller.signal
 			});
 
 			const data: ApiResponse<Category> = await res.json();
-			if (data.success && data.data) {
-				if (editingId) {
-					categories = categories.map((c) => (c.id === editingId ? data.data! : c));
+			if (session !== formSession || controller.signal.aborted) return;
+			if (res.ok && data.success && data.data) {
+				if (targetEditingId) {
+					categories = categories.map((c) => (c.id === targetEditingId ? data.data! : c));
 					success = '更新成功！';
 				} else {
 					categories = [...categories, data.data];
@@ -150,10 +172,14 @@
 			} else {
 				error = data.error || '保存失败';
 			}
-		} catch {
-			error = '网络错误';
+		} catch (caught) {
+			if (caught instanceof DOMException && caught.name === 'AbortError') return;
+			if (session === formSession) error = '网络错误';
 		} finally {
-			saving = false;
+			if (session === formSession && saveController === controller) {
+				saveController = null;
+				saving = false;
+			}
 		}
 	}
 
@@ -168,18 +194,14 @@
 		if (!confirm(confirmMsg)) return;
 
 		try {
-			const token = localStorage.getItem('admin_token');
 			const res = await fetch('/api/admin/categories', {
 				method: 'DELETE',
-				headers: {
-					'Content-Type': 'application/json',
-					...(token ? { Authorization: `Bearer ${token}` } : {})
-				},
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ id })
 			});
 
 			const data: ApiResponse = await res.json();
-			if (data.success) {
+			if (res.ok && data.success) {
 				categories = categories.filter((c) => c.id !== id);
 				onCategoriesChange(categories);
 				success = '删除成功！';
@@ -196,31 +218,39 @@
 
 	// 处理分类拖放排序
 	async function handleReorder(reorderedCategories: Category[]) {
+		if (reordering) return;
+
+		const previousCategories = categories.map((category) => ({ ...category }));
 		categories = reorderedCategories;
 		onCategoriesChange(categories);
+		reordering = true;
+		error = '';
+		success = '';
 
 		try {
-			const token = localStorage.getItem('admin_token');
-			for (const category of reorderedCategories) {
-				await fetch('/api/admin/categories', {
-					method: 'PUT',
-					headers: {
-						'Content-Type': 'application/json',
-						...(token ? { Authorization: `Bearer ${token}` } : {})
-					},
-					body: JSON.stringify({
+			const res = await fetch('/api/admin/categories', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					orders: reorderedCategories.map((category) => ({
 						id: category.id,
-						name: category.name,
-						icon: category.icon,
-						color: category.color,
-						description: category.description,
 						order: category.order
-					})
-				});
+					}))
+				})
+			});
+			const data: ApiResponse<CategoryList> = await res.json();
+			if (!res.ok || !data.success || !data.data) {
+				throw new Error(data.error || '服务器未返回更新后的分类列表');
 			}
+			categories = data.data.items;
+			onCategoriesChange(categories);
 			success = '排序已更新！';
-		} catch {
-			error = '更新排序失败';
+		} catch (caught) {
+			categories = previousCategories;
+			onCategoriesChange(categories);
+			error = caught instanceof Error ? `更新排序失败：${caught.message}` : '更新排序失败';
+		} finally {
+			reordering = false;
 		}
 	}
 
@@ -229,12 +259,9 @@
 		loading = true;
 		error = '';
 		try {
-			const token = localStorage.getItem('admin_token');
-			const res = await fetch('/api/admin/categories', {
-				headers: { Authorization: `Bearer ${token}` }
-			});
+			const res = await fetch('/api/admin/categories');
 			const data: ApiResponse<{ items: Category[] }> = await res.json();
-			if (data.success && data.data) {
+			if (res.ok && data.success && data.data) {
 				categories = data.data.items;
 				onCategoriesChange(categories);
 			} else {
@@ -251,22 +278,34 @@
 <section class="form-section">
 	<div class="section-header">
 		<h2>🗂️ 分类管理</h2>
-		<button class="btn btn-primary btn-small" onclick={() => openForm()}>+ 添加分类</button>
+		<button class="btn btn-primary btn-small" type="button" onclick={() => openForm()}
+			>+ 添加分类</button
+		>
 	</div>
 
 	{#if error}
-		<div class="alert alert-error">
+		<div class="alert alert-error" role="alert">
 			<span>❌</span>
 			{error}
-			<button class="alert-close" onclick={() => (error = '')}>×</button>
+			<button
+				class="alert-close"
+				type="button"
+				aria-label="关闭错误提示"
+				onclick={() => (error = '')}>×</button
+			>
 		</div>
 	{/if}
 
 	{#if success}
-		<div class="alert alert-success">
+		<div class="alert alert-success" role="status" aria-live="polite">
 			<span>✅</span>
 			{success}
-			<button class="alert-close" onclick={() => (success = '')}>×</button>
+			<button
+				class="alert-close"
+				type="button"
+				aria-label="关闭成功提示"
+				onclick={() => (success = '')}>×</button
+			>
 		</div>
 	{/if}
 
@@ -282,49 +321,64 @@
 			<p class="empty-hint">点击上方按钮添加第一个分类～</p>
 		</div>
 	{:else}
-		<DraggableList items={categories} onreorder={handleReorder}>
-			{#snippet children(category: Category)}
-				<div class="category-icon-wrapper">
-					{#if category.color}
-						<div class="category-color-dot" style:background-color={category.color}></div>
-					{/if}
-					<div class="category-icon">{category.icon || '📁'}</div>
-				</div>
-				<div class="category-info">
-					<div class="category-name-row">
-						<span class="category-name">{category.name}</span>
-						<span class="category-count-badge">{getCategoryDownloadCount(category.id)}</span>
-					</div>
-					{#if category.description}
-						<div class="category-desc">{category.description}</div>
-					{/if}
-					<div class="category-meta">
-						排序: {category.order}
+		<div aria-busy={reordering}>
+			<DraggableList items={categories} onreorder={handleReorder} disabled={reordering}>
+				{#snippet children(category: Category)}
+					<div class="category-icon-wrapper">
 						{#if category.color}
-							<span class="color-preview" style:background-color={category.color}
-								>{category.color}</span
-							>
+							<div class="category-color-dot" style:background-color={category.color}></div>
 						{/if}
+						<div class="category-icon">{category.icon || '📁'}</div>
 					</div>
-				</div>
-				<div class="category-actions">
-					<button class="btn btn-small" onclick={() => openForm(category)}>编辑</button>
-					<button class="btn btn-small btn-danger" onclick={() => handleDelete(category.id)}>
-						删除
-					</button>
-				</div>
-			{/snippet}
-		</DraggableList>
+					<div class="category-info">
+						<div class="category-name-row">
+							<span class="category-name">{category.name}</span>
+							<span class="category-count-badge">{getCategoryDownloadCount(category.id)}</span>
+						</div>
+						{#if category.description}
+							<div class="category-desc">{category.description}</div>
+						{/if}
+						<div class="category-meta">
+							排序: {category.order}
+							{#if category.color}
+								<span class="color-preview" style:background-color={category.color}
+									>{category.color}</span
+								>
+							{/if}
+						</div>
+					</div>
+					<div class="category-actions">
+						<button class="btn btn-small" type="button" onclick={() => openForm(category)}
+							>编辑</button
+						>
+						<button
+							class="btn btn-small btn-danger"
+							type="button"
+							onclick={() => handleDelete(category.id)}
+						>
+							删除
+						</button>
+					</div>
+				{/snippet}
+			</DraggableList>
+		</div>
 	{/if}
 </section>
 
 {#if showForm}
 	<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-		<button type="button" class="modal-scrim" onclick={closeForm} aria-label="关闭"></button>
+		<button type="button" class="modal-scrim" onclick={closeForm} aria-label="关闭分类表单"
+		></button>
 		<div class="modal-card modal-lg" bind:this={dialogRef} use:trapFocus tabindex="-1">
 			<div class="modal-header">
 				<h3 id={titleId}>{editingId ? '编辑分类' : '添加分类'}</h3>
-				<button type="button" class="modal-close" onclick={closeForm} bind:this={closeButtonRef}>
+				<button
+					type="button"
+					class="modal-close"
+					onclick={closeForm}
+					bind:this={closeButtonRef}
+					aria-label="关闭分类表单"
+				>
 					×
 				</button>
 			</div>
@@ -345,8 +399,7 @@
 						id="categoryDesc"
 						bind:value={formDescription}
 						placeholder="简单描述这个分类"
-						rows="2"
-					></textarea>
+						rows="2"></textarea>
 				</div>
 
 				<div class="form-group">
@@ -468,6 +521,7 @@
 		align-items: center;
 		gap: 0.5rem;
 		margin-bottom: 1rem;
+		overflow-wrap: anywhere;
 	}
 
 	.alert-error {
@@ -586,6 +640,7 @@
 		font-size: 0.85rem;
 		color: #8b7ba8;
 		margin-top: 0.25rem;
+		overflow-wrap: anywhere;
 	}
 
 	.category-meta {
@@ -772,6 +827,9 @@
 
 	.form-group input,
 	.form-group textarea {
+		box-sizing: border-box;
+		min-width: 0;
+		width: 100%;
 		padding: 0.75rem 1rem;
 		border: 2px solid #e6e0f0;
 		border-radius: 12px;
@@ -815,6 +873,61 @@
 
 	.picker-container {
 		margin-top: 0.5rem;
+		max-width: 100%;
+		overflow-x: auto;
+	}
+
+	@media (max-width: 640px) {
+		.form-section {
+			padding: 1rem;
+			border-radius: 16px;
+		}
+
+		.section-header {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 0.75rem;
+		}
+
+		.category-actions {
+			width: 100%;
+			flex-wrap: wrap;
+		}
+
+		.category-actions .btn {
+			flex: 1;
+		}
+
+		.modal-backdrop {
+			align-items: flex-end;
+			padding: 0.5rem;
+		}
+
+		.modal-card {
+			box-sizing: border-box;
+			max-height: calc(100dvh - 1rem);
+			padding: 1rem;
+		}
+
+		.icon-input-group,
+		.color-input-group {
+			align-items: stretch;
+			flex-wrap: wrap;
+		}
+
+		.icon-input-group input,
+		.color-input-group input {
+			flex-basis: calc(100% - 5.5rem);
+		}
+
+		.modal-footer {
+			flex-wrap: wrap;
+		}
+
+		.modal-footer .btn {
+			flex: 1;
+			justify-content: center;
+		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {

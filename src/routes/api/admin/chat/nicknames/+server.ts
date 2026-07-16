@@ -5,11 +5,11 @@ import type { ApiResponse, NicknameKeywordList } from '$lib/types';
 const KV_KEY = 'chat_nickname_keywords';
 
 export const GET: RequestHandler = async ({ request, platform }) => {
-	const authed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET);
+	const authed = await requireAdminAuth(request, platform?.env?.ADMIN_JWT_SECRET);
 	if (!authed)
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 
-	const kv = platform?.env.APP_KV;
+	const kv = platform?.env?.APP_KV;
 	if (!kv)
 		return json({
 			success: true,
@@ -24,11 +24,11 @@ export const GET: RequestHandler = async ({ request, platform }) => {
 };
 
 export const PUT: RequestHandler = async ({ request, platform }) => {
-	const authed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET);
+	const authed = await requireAdminAuth(request, platform?.env?.ADMIN_JWT_SECRET);
 	if (!authed)
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 
-	const kv = platform?.env.APP_KV;
+	const kv = platform?.env?.APP_KV;
 	if (!kv)
 		return json({ success: false, error: 'KV 不可用' } satisfies ApiResponse, { status: 500 });
 

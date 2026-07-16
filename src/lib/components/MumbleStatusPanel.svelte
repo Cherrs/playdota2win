@@ -14,11 +14,14 @@
 	let refreshingHealth = $state(false);
 	let clientState = $state<MumbleClientSnapshot>(createInitialMumbleClientSnapshot());
 	let proxyHealth = $state<MumbleProxyHealth | null>(null);
-	let healthUrl = $state<string | null>(null);
 
 	let client: ReturnType<typeof createMumbleClient> | null = null;
 	let unsubscribeClient: (() => void) | null = null;
-	let healthInterval: ReturnType<typeof setInterval> | null = null;
+	let healthTimer: ReturnType<typeof setTimeout> | null = null;
+	let healthRequest: Promise<void> | null = null;
+	let healthController: AbortController | null = null;
+	let destroyed = false;
+	const HEALTH_REFRESH_INTERVAL_MS = 15_000;
 
 	const channelNameMap = $derived(createChannelNameMap(clientState.channels));
 	const visibleUsers = $derived(
@@ -46,8 +49,7 @@
 		try {
 			const res = await fetch('/api/mumble/config');
 			const data: ApiResponse<MumbleProxyConfig> = await res.json();
-			if (data.success && data.data) {
-				healthUrl = data.data.healthUrl;
+			if (res.ok && data.success && data.data) {
 				return data.data;
 			}
 			configError = data.error || 'Mumble 代理配置不可用';
@@ -57,34 +59,59 @@
 		return null;
 	}
 
-	async function refreshHealth(): Promise<void> {
-		if (!healthUrl) {
-			healthError = 'Mumble 代理健康检查地址尚未配置';
-			return;
-		}
+	async function performHealthRefresh(): Promise<void> {
 		refreshingHealth = true;
 		healthError = '';
-		const checkedAt = Date.now();
+		const controller = new AbortController();
+		healthController = controller;
 		try {
-			const response = await fetch(healthUrl, { headers: { Accept: 'text/plain' } });
-			const message = (await response.text()).trim() || response.statusText || 'unknown';
-			proxyHealth = {
-				healthy: response.ok && message.toLowerCase() === 'ok',
-				status: response.status,
-				message,
-				checkedAt,
-				url: healthUrl
-			};
-		} catch {
-			healthError = '获取代理健康状态失败（代理可能未运行）';
+			const response = await fetch('/api/admin/mumble/health', {
+				headers: { Accept: 'application/json' },
+				signal: controller.signal
+			});
+			const data: ApiResponse<MumbleProxyHealth> = await response.json();
+			if (!response.ok || !data.success || !data.data) {
+				throw new Error(data.error || `健康检查失败（HTTP ${response.status}）`);
+			}
+			proxyHealth = data.data;
+		} catch (caught) {
+			if (caught instanceof DOMException && caught.name === 'AbortError') return;
+			healthError = caught instanceof Error ? caught.message : '获取代理健康状态失败';
 		} finally {
-			refreshingHealth = false;
+			if (healthController === controller) {
+				healthController = null;
+				refreshingHealth = false;
+			}
 		}
+	}
+
+	async function refreshHealth(): Promise<void> {
+		if (healthRequest) return healthRequest;
+		healthRequest = performHealthRefresh();
+		try {
+			await healthRequest;
+		} finally {
+			healthRequest = null;
+		}
+	}
+
+	function scheduleHealthRefresh(): void {
+		if (healthTimer) clearTimeout(healthTimer);
+		if (destroyed) return;
+		healthTimer = setTimeout(async () => {
+			await refreshHealth();
+			scheduleHealthRefresh();
+		}, HEALTH_REFRESH_INTERVAL_MS);
+	}
+
+	async function handleManualHealthRefresh(): Promise<void> {
+		await refreshHealth();
+		scheduleHealthRefresh();
 	}
 
 	function handleReconnect(): void {
 		client?.reconnect();
-		void refreshHealth();
+		void handleManualHealthRefresh();
 	}
 
 	function formatTime(timestamp: number): string {
@@ -111,39 +138,39 @@
 
 	onMount(() => {
 		let cancelled = false;
+		destroyed = false;
 
 		(async () => {
+			const healthRefresh = refreshHealth();
 			const config = await fetchMumbleConfig();
-			await refreshHealth();
 
-			if (cancelled || !config) {
+			if (cancelled) return;
+			if (!config) {
 				loading = false;
-				return;
+			} else {
+				client = createMumbleClient({
+					config,
+					nickname: `监控-${Math.floor(Math.random() * 9000 + 1000)}`,
+					mode: 'monitor'
+				});
+				unsubscribeClient = client.state.subscribe((nextState) => {
+					clientState = nextState;
+				});
+				client.connect();
+				loading = false;
 			}
 
-			client = createMumbleClient({
-				config,
-				nickname: `监控-${Math.floor(Math.random() * 9000 + 1000)}`,
-				mode: 'monitor'
-			});
-			unsubscribeClient = client.state.subscribe((nextState) => {
-				clientState = nextState;
-			});
-			client.connect();
-			loading = false;
+			await healthRefresh;
+			if (!cancelled) scheduleHealthRefresh();
 		})();
-
-		healthInterval = setInterval(() => {
-			void refreshHealth();
-		}, 15000);
 
 		return () => {
 			cancelled = true;
+			destroyed = true;
 			unsubscribeClient?.();
 			client?.destroy();
-			if (healthInterval) {
-				clearInterval(healthInterval);
-			}
+			healthController?.abort();
+			if (healthTimer) clearTimeout(healthTimer);
 		};
 	});
 </script>
@@ -158,23 +185,30 @@
 		</div>
 
 		<div class="panel-actions">
-			<button class="action-btn soft" type="button" onclick={() => void refreshHealth()}>
+			<button
+				class="action-btn soft"
+				type="button"
+				onclick={() => void handleManualHealthRefresh()}
+				disabled={refreshingHealth}
+			>
 				{refreshingHealth ? '刷新中...' : '刷新健康'}
 			</button>
-			<button class="action-btn" type="button" onclick={handleReconnect}>重连监控</button>
+			<button class="action-btn" type="button" onclick={handleReconnect} disabled={loading}
+				>重连监控</button
+			>
 		</div>
 	</div>
 
 	{#if configError}
-		<div class="alert alert-error">❌ {configError}</div>
+		<div class="alert alert-error" role="alert">❌ {configError}</div>
 	{/if}
 
 	{#if healthError}
-		<div class="alert alert-error">❌ {healthError}</div>
+		<div class="alert alert-error" role="alert">❌ {healthError}</div>
 	{/if}
 
 	<div class="summary-grid">
-		<section class="summary-card">
+		<section class="summary-card" aria-live="polite" aria-busy={refreshingHealth}>
 			<h3>代理健康</h3>
 			{#if proxyHealth}
 				<div class="status-line">
@@ -300,6 +334,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
+		min-width: 0;
 	}
 
 	.panel-header {
@@ -340,6 +375,16 @@
 		cursor: pointer;
 	}
 
+	.action-btn:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+
+	.action-btn:focus-visible {
+		outline: 3px solid rgba(107, 76, 154, 0.28);
+		outline-offset: 2px;
+	}
+
 	.action-btn.soft {
 		background: rgba(107, 76, 154, 0.12);
 		color: #6b4c9a;
@@ -359,6 +404,7 @@
 	.content-grid {
 		display: grid;
 		gap: 1rem;
+		min-width: 0;
 	}
 
 	.summary-grid {
@@ -376,6 +422,7 @@
 		border-radius: 18px;
 		padding: 1rem 1.1rem;
 		box-shadow: 0 8px 24px rgba(107, 76, 154, 0.08);
+		min-width: 0;
 	}
 
 	.summary-card h3,
@@ -483,6 +530,26 @@
 
 		.action-btn {
 			flex: 1;
+		}
+
+		.content-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+
+	@media (max-width: 390px) {
+		.panel-actions {
+			flex-direction: column;
+		}
+
+		.summary-card,
+		.content-card {
+			padding: 0.9rem;
+		}
+
+		th,
+		td {
+			padding: 0.6rem;
 		}
 	}
 </style>

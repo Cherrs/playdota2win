@@ -1,0 +1,4 @@
+# Wrangler generates a few declaration comments with trailing spaces. Preserve the exact generated
+# file so `wrangler types --check` remains reproducible without treating those lines as hand-written
+# whitespace errors.
+src/worker-configuration.d.ts -whitespace

@@ -1,20 +1,16 @@
 <script lang="ts">
 	interface Props {
-		downloadCount: number;
 		itemCount: number;
 		onLogout: () => void;
 	}
 
-	let { downloadCount, itemCount, onLogout }: Props = $props();
+	let { itemCount, onLogout }: Props = $props();
 </script>
 
 <header class="admin-header">
 	<h1>🎮 PlayDota2Win 管理后台</h1>
 	<div class="header-actions">
 		<div class="stats">
-			<span class="stat-item">
-				📥 总下载次数: <strong>{downloadCount.toLocaleString()}</strong>
-			</span>
 			<span class="stat-item">
 				📦 下载项: <strong>{itemCount}</strong>
 			</span>

@@ -4,7 +4,7 @@ import type { ApiResponse, MumbleProxyHealth } from '$lib/types';
 import { getMumbleProxyHealthUrl } from '$lib/server/mumble/config';
 
 export const GET: RequestHandler = async ({ request, fetch, platform, url }) => {
-	const authed = await requireAdminAuth(request, platform?.env.ADMIN_JWT_SECRET);
+	const authed = await requireAdminAuth(request, platform?.env?.ADMIN_JWT_SECRET);
 	if (!authed) {
 		return json({ success: false, error: '未授权' } satisfies ApiResponse, { status: 401 });
 	}

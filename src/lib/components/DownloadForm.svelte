@@ -1,13 +1,9 @@
 <script lang="ts">
-	import type {
-		DownloadItem,
-		ApiResponse,
-		Platform,
-		StorageType,
-		S3Config,
-		Category
-	} from '$lib/types';
+	import { onDestroy } from 'svelte';
+	import type { DownloadItem, ApiResponse, Platform, StorageType, Category } from '$lib/types';
+	import { MAX_ADMIN_R2_UPLOAD_BYTES, formatMiB } from '$lib/upload-limits';
 	import { parseDownloadFileInfo } from '$lib/utils/parseFilename';
+	import { normalizePublicHttpsUrl } from '$lib/utils/public-url';
 
 	interface Props {
 		categories: Category[];
@@ -31,15 +27,20 @@
 	let formStorageType = $state<StorageType>('link');
 	let formUrl = $state('');
 	let formFile = $state<File | null>(null);
-	let formS3Endpoint = $state('');
-	let formS3Bucket = $state('');
 	let formS3PresignedUrl = $state('');
 	let formS3PublicUrl = $state('');
-	let formS3Region = $state('auto');
 	let formCategoryId = $state<string | undefined>(undefined);
 	let formRustDeskEnabled = $state(false);
 	let formRustDeskIdServer = $state('');
 	let formRustDeskKey = $state('');
+	let fileInputRef = $state<HTMLInputElement | null>(null);
+	let submitController: AbortController | null = null;
+	let submitRunId = 0;
+
+	onDestroy(() => {
+		submitRunId += 1;
+		submitController?.abort();
+	});
 
 	function applyParsedFileInfo(input: string, updateFilename: boolean) {
 		const parsed = parseDownloadFileInfo(input);
@@ -68,8 +69,9 @@
 		applyParsedFileInfo(input.value, false);
 	}
 
-	// 重置表单
-	function resetForm() {
+	function clearFormFields(): void {
+		formPlatform = 'windows';
+		formTitle = '';
 		formDescription = '';
 		formConfigGuide = '';
 		formFilename = '';
@@ -78,15 +80,22 @@
 		formStorageType = 'link';
 		formUrl = '';
 		formFile = null;
-		formS3Endpoint = '';
-		formS3Bucket = '';
 		formS3PresignedUrl = '';
 		formS3PublicUrl = '';
-		formS3Region = 'auto';
 		formCategoryId = undefined;
 		formRustDeskEnabled = false;
 		formRustDeskIdServer = '';
 		formRustDeskKey = '';
+		if (fileInputRef) fileInputRef.value = '';
+	}
+
+	// 重置表单，并使仍在途的保存响应失效。
+	function resetForm() {
+		submitRunId += 1;
+		submitController?.abort();
+		submitController = null;
+		saving = false;
+		clearFormFields();
 		error = '';
 		success = '';
 	}
@@ -107,105 +116,171 @@
 
 	// 添加下载项
 	async function handleAdd() {
+		if (saving) return;
 		if (!formVersion || !formSize) {
 			error = '请填写版本和大小';
+			return;
+		}
+		if (
+			formVersion.length > 128 ||
+			formSize.length > 128 ||
+			formTitle.length > 200 ||
+			formDescription.length > 4000 ||
+			formConfigGuide.length > 20_000 ||
+			formFilename.length > 512
+		) {
+			error = '表单字段过长，请缩短后重试';
 			return;
 		}
 		if (formRustDeskEnabled && (!formRustDeskIdServer.trim() || !formRustDeskKey.trim())) {
 			error = '请填写 RustDesk ID 服务器和 key';
 			return;
 		}
+		if (formRustDeskIdServer.length > 255 || formRustDeskKey.length > 4096) {
+			error = 'RustDesk 配置字段过长';
+			return;
+		}
+		const submittedPlatform = formPlatform;
+		const submittedStorageType = formStorageType;
+		const submittedFile = formFile;
+		const submittedFilename = formFilename;
+		const submittedUrl = formUrl;
+		const submittedTitle = formTitle;
+		const submittedDescription = formDescription;
+		const submittedConfigGuide = formConfigGuide;
+		const submittedVersion = formVersion;
+		const submittedSize = formSize;
+		const submittedCategoryId = formCategoryId;
+		const submittedRustDeskEnabled = formRustDeskEnabled;
+		const submittedRustDeskIdServer = formRustDeskIdServer;
+		const submittedRustDeskKey = formRustDeskKey;
+		const submittedS3PresignedUrl = formS3PresignedUrl;
+		const submittedS3PublicUrl = formS3PublicUrl;
 
+		const runId = ++submitRunId;
+		const controller = new AbortController();
+		submitController = controller;
 		saving = true;
 		error = '';
 		success = '';
 
 		try {
-			const formData = new FormData();
-			formData.append('platform', formPlatform);
-			if (formTitle) {
-				formData.append('title', formTitle);
-			}
-			if (formDescription) {
-				formData.append('description', formDescription);
-			}
-			if (formConfigGuide) {
-				formData.append('configGuide', formConfigGuide);
-			}
-			if (formFilename) {
-				formData.append('filename', formFilename);
-			}
-			formData.append('version', formVersion);
-			formData.append('size', formSize);
-			formData.append('storageType', formStorageType);
-			formData.append(
-				'rustdeskConfig',
-				JSON.stringify({
-					enabled: formRustDeskEnabled,
-					idServer: formRustDeskIdServer.trim(),
-					key: formRustDeskKey.trim()
-				})
-			);
-
-			if (formCategoryId) {
-				formData.append('categoryId', formCategoryId);
-			}
-
-			if (formStorageType === 'link') {
-				if (!formUrl) {
+			let downloadUrl: string;
+			if (submittedStorageType === 'link') {
+				if (!submittedUrl) {
 					error = '请填写下载链接';
-					saving = false;
 					return;
 				}
-				formData.append('url', formUrl);
-			} else if (formStorageType === 'r2' || formStorageType === 's3') {
-				if (!formFile) {
+				downloadUrl = submittedUrl;
+			} else {
+				if (!submittedFile) {
 					error = '请选择文件';
-					saving = false;
 					return;
 				}
-				formData.append('file', formFile);
-				if (!formFilename) {
-					formFilename = formFile.name;
-					formData.append('filename', formFilename);
+				if (submittedFile.size <= 0) {
+					error = '文件不能为空';
+					return;
 				}
+				const uploadFilename = submittedFilename.trim() || submittedFile.name;
 
-				if (formStorageType === 's3') {
-					if (!formS3PresignedUrl || !formS3PublicUrl) {
-						error = '请填写预签名上传 URL 和公开下载 URL';
-						saving = false;
+				if (submittedStorageType === 'r2') {
+					if (submittedFile.size > MAX_ADMIN_R2_UPLOAD_BYTES) {
+						error = `R2 上传不能超过 ${formatMiB(MAX_ADMIN_R2_UPLOAD_BYTES)}`;
 						return;
 					}
-					const s3Config: S3Config = {
-						endpoint: formS3Endpoint || undefined,
-						bucket: formS3Bucket || undefined,
-						region: formS3Region || undefined,
-						presignedUrl: formS3PresignedUrl,
-						publicUrl: formS3PublicUrl
-					};
-					formData.append('s3Config', JSON.stringify(s3Config));
+					const params = new URLSearchParams({
+						platform: submittedPlatform,
+						filename: uploadFilename
+					});
+					const uploadResponse = await fetch(`/api/admin/uploads?${params}`, {
+						method: 'PUT',
+						headers: {
+							'Content-Type': submittedFile.type || 'application/octet-stream'
+						},
+						body: submittedFile,
+						signal: controller.signal
+					});
+					const uploadData = (await uploadResponse.json()) as ApiResponse<{ url: string }>;
+					if (!uploadResponse.ok || !uploadData.success || !uploadData.data?.url) {
+						error = uploadData.error || 'R2 上传失败';
+						return;
+					}
+					downloadUrl = uploadData.data.url;
+				} else {
+					if (!submittedS3PresignedUrl || !submittedS3PublicUrl) {
+						error = '请填写预签名上传 URL 和公开下载 URL';
+						return;
+					}
+					let presignedUrl: string;
+					let publicUrl: string;
+					try {
+						presignedUrl = normalizePublicHttpsUrl(submittedS3PresignedUrl);
+						publicUrl = normalizePublicHttpsUrl(submittedS3PublicUrl);
+					} catch (validationError) {
+						error = validationError instanceof Error ? validationError.message : 'S3 URL 无效';
+						return;
+					}
+					const uploadResponse = await fetch(presignedUrl, {
+						method: 'PUT',
+						headers: {
+							'Content-Type': submittedFile.type || 'application/octet-stream'
+						},
+						body: submittedFile,
+						signal: controller.signal
+					});
+					if (!uploadResponse.ok) {
+						error = `S3 上传失败（HTTP ${uploadResponse.status}）`;
+						return;
+					}
+					downloadUrl = publicUrl;
 				}
 			}
 
-			const token = localStorage.getItem('admin_token');
+			const metadata = {
+				platform: submittedPlatform,
+				title: submittedTitle || undefined,
+				description: submittedDescription || undefined,
+				configGuide: submittedConfigGuide || undefined,
+				filename: submittedFilename || submittedFile?.name || undefined,
+				version: submittedVersion,
+				size: submittedSize,
+				storageType: submittedStorageType,
+				url: downloadUrl,
+				categoryId: submittedCategoryId,
+				rustdeskConfig: {
+					enabled: submittedRustDeskEnabled,
+					idServer: submittedRustDeskIdServer.trim(),
+					key: submittedRustDeskKey.trim()
+				}
+			};
 			const res = await fetch('/api/admin', {
 				method: 'POST',
-				headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-				body: formData
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(metadata),
+				signal: controller.signal
 			});
 
 			const data: ApiResponse<DownloadItem> = await res.json();
-			if (data.success && data.data) {
+			if (runId !== submitRunId || controller.signal.aborted) return;
+			if (res.ok && data.success && data.data) {
+				const addedStorageType = submittedStorageType;
 				onAdd(data.data);
-				success = '添加成功！';
-				resetForm();
+				clearFormFields();
+				success =
+					addedStorageType === 'link' && data.data.r2Backup?.status === 'failed'
+						? '添加成功，但首次 R2 备份失败，请稍后重试同步。'
+						: '添加成功！';
 			} else {
 				error = data.error || '添加失败';
 			}
-		} catch {
-			error = '网络错误';
+		} catch (caught) {
+			if (caught instanceof DOMException && caught.name === 'AbortError') return;
+			if (runId === submitRunId) error = '网络错误';
 		} finally {
-			saving = false;
+			if (runId === submitRunId && submitController === controller) {
+				submitController = null;
+				saving = false;
+			}
 		}
 	}
 </script>
@@ -214,18 +289,28 @@
 	<h2>✨ 添加下载项</h2>
 
 	{#if error}
-		<div class="alert alert-error">
+		<div class="alert alert-error" role="alert">
 			<span>❌</span>
 			{error}
-			<button class="alert-close" onclick={() => (error = '')}>×</button>
+			<button
+				class="alert-close"
+				type="button"
+				aria-label="关闭错误提示"
+				onclick={() => (error = '')}>×</button
+			>
 		</div>
 	{/if}
 
 	{#if success}
-		<div class="alert alert-success">
+		<div class="alert alert-success" role="status" aria-live="polite">
 			<span>✅</span>
 			{success}
-			<button class="alert-close" onclick={() => (success = '')}>×</button>
+			<button
+				class="alert-close"
+				type="button"
+				aria-label="关闭成功提示"
+				onclick={() => (success = '')}>×</button
+			>
 		</div>
 	{/if}
 
@@ -318,6 +403,7 @@
 				oninput={handleUrlChange}
 				placeholder="https://example.com/download.exe"
 			/>
+			<p class="field-hint">添加时会同步备份到 Cloudflare R2；原链接不可用时会自动使用备份下载。</p>
 		</div>
 	{/if}
 
@@ -325,9 +411,14 @@
 	{#if formStorageType === 'r2' || formStorageType === 's3'}
 		<div class="form-group full-width">
 			<label for="file">选择文件</label>
-			<input id="file" type="file" onchange={handleFileSelect} />
+			<input id="file" type="file" onchange={handleFileSelect} bind:this={fileInputRef} />
 			{#if formFile}
 				<span class="file-info">📄 {formFile.name}</span>
+			{/if}
+			{#if formStorageType === 'r2'}
+				<p class="field-hint">
+					文件会以原始请求体流式上传，最大 {formatMiB(MAX_ADMIN_R2_UPLOAD_BYTES)}。
+				</p>
 			{/if}
 		</div>
 	{/if}
@@ -337,19 +428,6 @@
 		<div class="s3-config">
 			<h3>🗄️ S3 配置</h3>
 			<div class="form-grid">
-				<div class="form-group">
-					<label for="s3Endpoint">Endpoint</label>
-					<input
-						id="s3Endpoint"
-						type="url"
-						bind:value={formS3Endpoint}
-						placeholder="https://s3.example.com"
-					/>
-				</div>
-				<div class="form-group">
-					<label for="s3Bucket">Bucket</label>
-					<input id="s3Bucket" type="text" bind:value={formS3Bucket} placeholder="my-bucket" />
-				</div>
 				<div class="form-group">
 					<label for="s3PresignedUrl">预签名上传 URL</label>
 					<input
@@ -368,11 +446,10 @@
 						placeholder="https://cdn.example.com/file"
 					/>
 				</div>
-				<div class="form-group">
-					<label for="s3Region">Region</label>
-					<input id="s3Region" type="text" bind:value={formS3Region} placeholder="auto" />
-				</div>
 			</div>
+			<p class="field-hint">
+				文件由浏览器直接 PUT 到预签名 URL；S3 服务必须允许本站来源的 PUT、Content-Type 跨域请求。
+			</p>
 		</div>
 	{/if}
 
@@ -382,7 +459,8 @@
 			<span>作为 RustDesk 配置接口数据源</span>
 		</label>
 		<p class="field-hint">
-			开启后，公开接口 /api/rustdesk 会返回此下载项的下载链接、ID 服务器和 key。
+			开启后，公开的 /api/rustdesk 接口会返回此下载项的下载链接、版本号、ID 服务器和
+			key，调用时无需授权。
 		</p>
 
 		{#if formRustDeskEnabled}
@@ -410,14 +488,16 @@
 	</div>
 
 	<div class="form-actions">
-		<button class="btn btn-primary" onclick={handleAdd} disabled={saving}>
+		<button class="btn btn-primary" type="button" onclick={handleAdd} disabled={saving}>
 			{#if saving}
 				<span class="spinner"></span> 保存中...
 			{:else}
 				💾 添加下载项
 			{/if}
 		</button>
-		<button class="btn btn-secondary" onclick={resetForm}>🔄 重置</button>
+		<button class="btn btn-secondary" type="button" onclick={resetForm}
+			>{saving ? '取消并重置' : '🔄 重置'}</button
+		>
 	</div>
 </section>
 
@@ -446,6 +526,7 @@
 		align-items: center;
 		gap: 0.5rem;
 		margin-bottom: 1rem;
+		overflow-wrap: anywhere;
 	}
 
 	.alert-error {
@@ -495,6 +576,9 @@
 	.form-group input,
 	.form-group select,
 	.form-group textarea {
+		box-sizing: border-box;
+		min-width: 0;
+		width: 100%;
 		padding: 0.75rem 1rem;
 		border: 2px solid #e6e0f0;
 		border-radius: 12px;
@@ -526,6 +610,7 @@
 		font-size: 0.9rem;
 		color: #6b4c9a;
 		margin-top: 0.5rem;
+		overflow-wrap: anywhere;
 	}
 
 	.s3-config {
@@ -623,6 +708,48 @@
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+
+	@media (max-width: 640px) {
+		.form-section {
+			padding: 1rem;
+			border-radius: 16px;
+		}
+
+		.form-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.s3-config {
+			padding: 1rem;
+		}
+
+		.form-actions {
+			flex-wrap: wrap;
+		}
+
+		.form-actions .btn {
+			flex: 1 1 9rem;
+			justify-content: center;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.btn,
+		.form-group input,
+		.form-group select,
+		.form-group textarea {
+			transition: none;
+		}
+
+		.btn-primary:hover:not(:disabled) {
+			transform: none;
+			box-shadow: none;
+		}
+
+		.spinner {
+			animation: none;
 		}
 	}
 </style>

@@ -1,13 +1,19 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import type { DownloadList, ApiResponse } from '$lib/types';
+import type { DownloadList, PublicDownloadList, ApiResponse } from '$lib/types';
+import { toPublicDownloadList } from '$lib/public-downloads';
+import { createInitialDownloadCounts, readDownloadCounts } from '$lib/server/download-count-store';
+import { readDownloadList } from '$lib/server/download-list-store';
 
-const KV_KEY = 'downloads_list';
+const PUBLIC_CACHE_HEADERS = {
+	'Cache-Control': 'public, max-age=30, stale-while-revalidate=120'
+};
 
 // GET: 公开的下载列表 API
 export const GET: RequestHandler = async ({ platform }) => {
 	try {
-		const kv = platform?.env.APP_KV;
-		if (!kv) {
+		const kv = platform?.env?.APP_KV;
+		const r2 = platform?.env?.UPLOADS_BUCKET;
+		if (!kv && !r2) {
 			// 开发环境返回默认数据
 			const defaultList: DownloadList = {
 				items: [
@@ -34,51 +40,41 @@ export const GET: RequestHandler = async ({ platform }) => {
 						enabled: true
 					}
 				],
-				downloadCount: 12580,
+				downloadCount: 0,
 				lastUpdated: Date.now()
 			};
-			return json({ success: true, data: defaultList } satisfies ApiResponse<DownloadList>);
+			return json(
+				{
+					success: true,
+					data: toPublicDownloadList(defaultList)
+				} satisfies ApiResponse<PublicDownloadList>,
+				{ headers: PUBLIC_CACHE_HEADERS }
+			);
 		}
 
-		const data = await kv.get<DownloadList>(KV_KEY, 'json');
-		const list = data || { items: [], downloadCount: 12580, lastUpdated: Date.now() };
+		const { list } = await readDownloadList(kv, r2);
+		const enabledItems = list.items.filter((item) => item.enabled);
+		let downloadCounts = createInitialDownloadCounts(enabledItems);
+		if (kv) {
+			try {
+				downloadCounts = await readDownloadCounts(kv, enabledItems);
+			} catch (error) {
+				console.error({
+					component: 'download_counts',
+					event_name: 'download_count_read_failed',
+					message: 'Failed to read independent download counters; using item bootstrap values',
+					error_message: error instanceof Error ? error.message : String(error)
+				});
+			}
+		}
+		const publicList = toPublicDownloadList(list, downloadCounts);
 
-		// 只返回启用的下载项
-		const publicList: DownloadList = {
-			...list,
-			items: list.items.filter((item) => item.enabled)
-		};
-
-		return json({ success: true, data: publicList } satisfies ApiResponse<DownloadList>);
+		return json({ success: true, data: publicList } satisfies ApiResponse<PublicDownloadList>, {
+			headers: PUBLIC_CACHE_HEADERS
+		});
 	} catch (error) {
 		console.error('Error fetching downloads:', error);
 		return json({ success: false, error: 'Failed to fetch downloads' } satisfies ApiResponse, {
-			status: 500
-		});
-	}
-};
-
-// POST: 记录下载次数
-export const POST: RequestHandler = async ({ request, platform }) => {
-	try {
-		const kv = platform?.env.APP_KV;
-		if (!kv) {
-			return json({ success: true, data: { count: 12580 } } satisfies ApiResponse);
-		}
-
-		await request.json();
-
-		const data = await kv.get<DownloadList>(KV_KEY, 'json');
-		if (data) {
-			data.downloadCount = (data.downloadCount || 0) + 1;
-			await kv.put(KV_KEY, JSON.stringify(data));
-			return json({ success: true, data: { count: data.downloadCount } } satisfies ApiResponse);
-		}
-
-		return json({ success: true, data: { count: 12580 } } satisfies ApiResponse);
-	} catch (error) {
-		console.error('Error recording download:', error);
-		return json({ success: false, error: 'Failed to record download' } satisfies ApiResponse, {
 			status: 500
 		});
 	}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type {
-		DownloadItem,
-		DownloadList as DownloadListData,
+		PublicDownloadItem,
+		PublicDownloadList,
 		ApiResponse,
 		Category,
 		CategoryList
@@ -15,13 +15,14 @@
 	import GuideModal from '$lib/components/GuideModal.svelte';
 	import GuidePanel from '$lib/components/GuidePanel.svelte';
 	import AnnouncementList from '$lib/components/AnnouncementList.svelte';
-	import { isGuideVerified, setGuideVerified } from '$lib/utils/auth-state';
+	import { preloadTurnstileScript } from '$lib/utils/turnstile-client';
 
 	// 数据状态
 	let downloadCount = $state(0);
-	let downloads = $state<DownloadItem[]>([]);
+	let downloads = $state<PublicDownloadItem[]>([]);
 	let categories = $state<Category[]>([]);
 	let loading = $state(true);
+	let loadError = $state('');
 
 	// 分类选择
 	let selectedCategoryId = $state<string | null>(null);
@@ -29,25 +30,48 @@
 	// 下载状态
 	let downloading = $state(false);
 	let showPasswordModal = $state(false);
-	let pendingItem = $state<DownloadItem | null>(null);
+	let pendingItem = $state<PublicDownloadItem | null>(null);
 
 	// 配置指引状态
-	let selectedItem = $state<DownloadItem | null>(null);
+	let selectedItem = $state<PublicDownloadItem | null>(null);
+	let selectedConfigGuide = $state('');
 	let activeTab = $state<'download' | 'guide'>('download');
 	let guideMessage = $state('下载完成后请查看这里的配置指引～');
 
 	// 指引弹窗状态
 	let showGuideModal = $state(false);
-	let guideItem = $state<DownloadItem | null>(null);
+	let guideItem = $state<PublicDownloadItem | null>(null);
+	let guideConfigGuide = $state('');
+	let guideCache = $state<Record<string, string>>({});
 
 	// 指引密码验证状态
-	let isGuidePasswordVerified = $state(false);
-	let pendingGuideItem = $state<DownloadItem | null>(null);
+	let pendingGuideItem = $state<PublicDownloadItem | null>(null);
 	let showGuidePasswordModal = $state(false);
 
 	// Turnstile 状态
 	let requireTurnstile = $state(false);
 	let turnstileSiteKey = $state('');
+
+	interface TurnstileResponseState {
+		requireTurnstile?: boolean;
+		siteKey?: string;
+	}
+
+	function applyTurnstileState(state: TurnstileResponseState | undefined) {
+		if (typeof state?.requireTurnstile !== 'boolean') return;
+		requireTurnstile = state.requireTurnstile;
+		turnstileSiteKey = state.requireTurnstile ? state.siteKey || '' : '';
+	}
+
+	function cacheGuide(itemId: string, configGuide: string): void {
+		guideCache = { ...guideCache, [itemId]: configGuide };
+	}
+
+	function getCachedGuide(itemId: string): string | undefined {
+		return Object.prototype.hasOwnProperty.call(guideCache, itemId)
+			? guideCache[itemId]
+			: undefined;
+	}
 
 	// 加载分类列表
 	async function loadCategories() {
@@ -64,43 +88,29 @@
 
 	// 加载下载列表
 	async function loadDownloads() {
+		loading = true;
+		loadError = '';
 		try {
 			const res = await fetch('/api/downloads');
-			const data: ApiResponse<DownloadListData> = await res.json();
-			if (data.success && data.data) {
+			const data: ApiResponse<PublicDownloadList> = await res.json();
+			if (res.ok && data.success && data.data) {
 				downloads = data.data.items;
 				downloadCount = data.data.downloadCount;
+			} else {
+				throw new Error(data.error || `加载失败（HTTP ${res.status}）`);
 			}
 		} catch (e) {
 			console.error('Failed to load downloads:', e);
+			loadError = e instanceof Error ? e.message : '下载列表加载失败';
 		} finally {
 			loading = false;
 		}
 	}
 
-	// 检查是否需要 Turnstile
-	async function checkTurnstileRequired() {
-		try {
-			const res = await fetch('/api/downloads/link');
-			const data: ApiResponse<{
-				requireTurnstile: boolean;
-				siteKey: string;
-				failureCount: number;
-			}> = await res.json();
-			if (data.success && data.data) {
-				requireTurnstile = data.data.requireTurnstile;
-				turnstileSiteKey = data.data.siteKey;
-			}
-		} catch (e) {
-			console.error('Failed to check turnstile status:', e);
-		}
-	}
-
 	// 打开密码弹窗
-	function openPasswordModal(item: DownloadItem) {
+	function openPasswordModal(item: PublicDownloadItem) {
 		pendingItem = item;
 		showPasswordModal = true;
-		checkTurnstileRequired();
 	}
 
 	// 关闭密码弹窗
@@ -110,8 +120,14 @@
 	}
 
 	// 处理下载提交
-	async function handleDownloadSubmit(password: string, turnstileToken: string) {
-		if (!pendingItem) return;
+	async function handleDownloadSubmit(
+		password: string,
+		turnstileToken: string,
+		downloadSource: 'auto' | 'r2',
+		signal: AbortSignal
+	) {
+		const item = pendingItem;
+		if (!item) return;
 
 		downloading = true;
 		try {
@@ -119,28 +135,40 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					itemId: pendingItem.id,
+					itemId: item.id,
 					password,
+					downloadSource,
 					turnstileToken: turnstileToken || undefined
-				})
+				}),
+				signal
 			});
 			const data: ApiResponse<{
 				url: string;
 				filename?: string;
-				count?: number;
+				resolvedSource?: 'origin' | 'r2';
+				configGuide?: string;
 				requireTurnstile?: boolean;
 				siteKey?: string;
 			}> = await res.json();
+			signal.throwIfAborted();
 
-			if (data.success && data.data?.url) {
-				if (typeof data.data.count === 'number') {
-					downloadCount = data.data.count;
-				}
-				isGuidePasswordVerified = true;
-				setGuideVerified();
-				selectedItem = pendingItem;
+			if (res.ok && data.success && data.data?.url) {
+				applyTurnstileState(data.data);
+				downloadCount += 1;
+				downloads = downloads.map((download) =>
+					download.id === item.id
+						? { ...download, downloadCount: download.downloadCount + 1 }
+						: download
+				);
+				const configGuide = typeof data.data.configGuide === 'string' ? data.data.configGuide : '';
+				cacheGuide(item.id, configGuide);
+				selectedItem = item;
+				selectedConfigGuide = configGuide;
 				activeTab = 'guide';
-				guideMessage = '下载已开始，下面是配置指引～';
+				guideMessage =
+					data.data.resolvedSource === 'r2'
+						? 'R2 备用下载已开始，下面是配置指引～'
+						: '下载已开始，下面是配置指引～';
 
 				// 触发下载
 				const link = document.createElement('a');
@@ -155,11 +183,7 @@
 				document.body.removeChild(link);
 				closePasswordModal();
 			} else {
-				// 检查是否需要启用 Turnstile
-				if (data.data?.requireTurnstile && data.data?.siteKey) {
-					requireTurnstile = true;
-					turnstileSiteKey = data.data.siteKey;
-				}
+				applyTurnstileState(data.data);
 				throw new Error(data.error || '获取下载链接失败');
 			}
 		} finally {
@@ -168,14 +192,15 @@
 	}
 
 	// 打开指引弹窗
-	function openGuideModal(item: DownloadItem) {
-		if (isGuidePasswordVerified || isGuideVerified()) {
+	function openGuideModal(item: PublicDownloadItem) {
+		const cachedGuide = getCachedGuide(item.id);
+		if (cachedGuide !== undefined) {
 			guideItem = item;
+			guideConfigGuide = cachedGuide;
 			showGuideModal = true;
 		} else {
 			pendingGuideItem = item;
 			showGuidePasswordModal = true;
-			checkTurnstileRequired();
 		}
 	}
 
@@ -186,32 +211,47 @@
 	}
 
 	// 指引密码验证提交
-	async function handleGuidePasswordSubmit(password: string, turnstileToken: string) {
+	async function handleGuidePasswordSubmit(
+		password: string,
+		turnstileToken: string,
+		_downloadSource: 'auto' | 'r2',
+		signal: AbortSignal
+	) {
+		const item = pendingGuideItem;
+		if (!item) throw new Error('未选择要查看的配置指引');
 		const res = await fetch('/api/downloads/link', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
+				itemId: item.id,
 				password,
 				turnstileToken: turnstileToken || undefined,
 				action: 'guide'
-			})
+			}),
+			signal
 		});
-		const data: ApiResponse<{ verified: boolean; requireTurnstile?: boolean; siteKey?: string }> =
-			await res.json();
+		const data: ApiResponse<{
+			verified: boolean;
+			configGuide?: string;
+			requireTurnstile?: boolean;
+			siteKey?: string;
+		}> = await res.json();
+		signal.throwIfAborted();
 
-		if (data.success) {
-			isGuidePasswordVerified = true;
-			setGuideVerified();
-			if (pendingGuideItem) {
-				guideItem = pendingGuideItem;
-				showGuideModal = true;
-			}
+		if (
+			res.ok &&
+			data.success &&
+			data.data?.verified &&
+			typeof data.data.configGuide === 'string'
+		) {
+			applyTurnstileState(data.data);
+			cacheGuide(item.id, data.data.configGuide);
+			guideItem = item;
+			guideConfigGuide = data.data.configGuide;
+			showGuideModal = true;
 			closeGuidePasswordModal();
 		} else {
-			if (data.data?.requireTurnstile && data.data?.siteKey) {
-				requireTurnstile = true;
-				turnstileSiteKey = data.data.siteKey;
-			}
+			applyTurnstileState(data.data);
 			throw new Error(data.error || '验证失败');
 		}
 	}
@@ -220,6 +260,7 @@
 	function closeGuideModal() {
 		showGuideModal = false;
 		guideItem = null;
+		guideConfigGuide = '';
 	}
 
 	// 选择分类
@@ -233,7 +274,7 @@
 	}
 
 	// 过滤下载项（根据选中的分类）
-	function getFilteredDownloads(): DownloadItem[] {
+	function getFilteredDownloads(): PublicDownloadItem[] {
 		if (!selectedCategoryId) {
 			return downloads.filter((item) => item.enabled);
 		}
@@ -242,16 +283,22 @@
 
 	// 初始加载
 	$effect(() => {
+		preloadTurnstileScript();
 		loadCategories();
 		loadDownloads();
 	});
 </script>
 
 <svelte:head>
+	<link rel="preconnect" href="https://challenges.cloudflare.com" />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
-		href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap"
+		href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap"
+		rel="stylesheet"
+	/>
+	<link
+		href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700&display=swap"
 		rel="stylesheet"
 	/>
 	<title>下载 - PlayDota2Win</title>
@@ -318,6 +365,15 @@
 						<div class="spinner"></div>
 						<span>加载中...</span>
 					</div>
+				{:else if loadError}
+					<div class="no-downloads" role="alert">
+						<span>⚠️</span>
+						<p>下载列表加载失败</p>
+						<p class="hint">{loadError}</p>
+						<button class="retry-btn" type="button" onclick={() => void loadDownloads()}>
+							重新加载
+						</button>
+					</div>
 				{:else if downloads.length === 0}
 					<div class="no-downloads">
 						<span>📦</span>
@@ -343,7 +399,7 @@
 					</div>
 				{/if}
 			{:else}
-				<GuidePanel item={selectedItem} message={guideMessage} />
+				<GuidePanel item={selectedItem} configGuide={selectedConfigGuide} message={guideMessage} />
 			{/if}
 		</div>
 
@@ -353,6 +409,7 @@
 				item={pendingItem}
 				{requireTurnstile}
 				{turnstileSiteKey}
+				allowR2Download={pendingItem.storageType === 'link'}
 				onClose={closePasswordModal}
 				onSubmit={handleDownloadSubmit}
 			/>
@@ -360,13 +417,14 @@
 
 		<!-- 配置指引弹窗 -->
 		{#if showGuideModal && guideItem}
-			<GuideModal item={guideItem} onClose={closeGuideModal} />
+			<GuideModal item={guideItem} configGuide={guideConfigGuide} onClose={closeGuideModal} />
 		{/if}
 
 		<!-- 指引密码弹窗 -->
 		{#if showGuidePasswordModal && pendingGuideItem}
 			<PasswordModal
 				item={pendingGuideItem}
+				purpose="guide"
 				{requireTurnstile}
 				{turnstileSiteKey}
 				onClose={closeGuidePasswordModal}
@@ -408,6 +466,9 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 2rem;
+		box-sizing: border-box;
+		width: 100%;
+		min-width: 0;
 	}
 
 	/* 标题区 */
@@ -582,6 +643,25 @@
 		font-size: 0.9rem;
 		font-weight: 400;
 		color: #a89bc4;
+		overflow-wrap: anywhere;
+	}
+
+	.retry-btn {
+		margin-top: 0.75rem;
+		border: none;
+		border-radius: 999px;
+		padding: 0.65rem 1.1rem;
+		background: #6b4c9a;
+		color: white;
+		font: inherit;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.retry-btn:focus-visible,
+	.tab-btn:focus-visible {
+		outline: 3px solid rgba(107, 76, 154, 0.3);
+		outline-offset: 2px;
 	}
 
 	/* 底部 */
@@ -602,12 +682,36 @@
 
 	/* 响应式 */
 	@media (max-width: 600px) {
+		.main-content {
+			padding: 2rem 1rem;
+		}
+
 		.main-title {
 			font-size: 2rem;
 		}
 
 		.download-list {
 			grid-template-columns: 1fr;
+		}
+
+		.no-downloads {
+			padding: 2rem 1rem;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.title-emoji,
+		.no-downloads span,
+		.spinner {
+			animation: none;
+		}
+
+		.tab-btn {
+			transition: none;
+		}
+
+		.tab-btn:hover {
+			transform: none;
 		}
 	}
 </style>

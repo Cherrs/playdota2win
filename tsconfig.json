@@ -3,7 +3,7 @@
 	"compilerOptions": {
 		"rewriteRelativeImportExtensions": true,
 		"allowJs": true,
-		"checkJs": true,
+		"checkJs": false,
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
@@ -12,7 +12,19 @@
 		"strict": true,
 		"moduleResolution": "bundler",
 		"types": ["./src/worker-configuration.d.ts"]
-	}
+	},
+	"exclude": [
+		"node_modules/**",
+		".svelte-kit/output/**",
+		".svelte-kit/cloudflare/**",
+		".svelte-kit/cloudflare-tmp/**",
+		"src/service-worker.js",
+		"src/service-worker/**/*.js",
+		"src/service-worker.ts",
+		"src/service-worker/**/*.ts",
+		"src/service-worker.d.ts",
+		"src/service-worker/**/*.d.ts"
+	]
 	// Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
 	// except $lib which is handled by https://svelte.dev/docs/kit/configuration#files
 	//

@@ -54,11 +54,7 @@ function isBrowserReachableUrl(value: string, requestUrl?: URL): boolean {
 	}
 }
 
-function parseIceServers(
-	value: string | undefined,
-	turnUsername: string | undefined,
-	turnCredential: string | undefined
-): IceServer[] {
+function parseIceServerUrls(value: string | undefined): string[] {
 	const urls = value
 		? value
 				.split(',')
@@ -74,17 +70,21 @@ function parseIceServers(
 				})
 		: [];
 
-	const dedupedUrls = urls.length > 0 ? Array.from(new Set(urls)) : DEFAULT_STUN_SERVERS;
-	const username = turnUsername?.trim() || undefined;
-	const credential = turnCredential?.trim() || undefined;
-	const hasTurnCredentials = username !== undefined && credential !== undefined;
+	return urls.length > 0 ? Array.from(new Set(urls)) : DEFAULT_STUN_SERVERS;
+}
 
-	return dedupedUrls.map((url) => {
+function createIceServers(platform: App.Platform | undefined): IceServer[] {
+	const urls = parseIceServerUrls(platform?.env?.MUMBLE_PROXY_STUN_SERVERS);
+	const username = platform?.env?.MUMBLE_PROXY_TURN_USERNAME?.trim();
+	const credential = platform?.env?.MUMBLE_PROXY_TURN_CREDENTIAL?.trim();
+	const credentials = username && credential ? { username, credential } : null;
+
+	return urls.flatMap((url) => {
 		const isTurn = url.startsWith('turn:') || url.startsWith('turns:');
-		if (isTurn && hasTurnCredentials) {
-			return { urls: url, username, credential };
+		if (isTurn && !credentials) {
+			return [];
 		}
-		return { urls: url };
+		return [{ urls: url, ...(isTurn ? credentials : null) }];
 	});
 }
 
@@ -109,11 +109,11 @@ function deriveProxyUrl(requestUrl: URL | undefined, kind: 'ws' | 'health'): str
 	return url.toString();
 }
 
-export function getMumbleProxyConfig(
+export async function getMumbleProxyConfig(
 	platform: App.Platform | undefined,
 	requestUrl?: URL
-): MumbleProxyConfig | null {
-	const wsUrl = normalizeUrl(platform?.env.MUMBLE_PROXY_WS_URL);
+): Promise<MumbleProxyConfig | null> {
+	const wsUrl = normalizeUrl(platform?.env?.MUMBLE_PROXY_WS_URL);
 	if (wsUrl && !isBrowserReachableUrl(wsUrl, requestUrl)) {
 		return null;
 	}
@@ -121,15 +121,11 @@ export function getMumbleProxyConfig(
 		return null;
 	}
 
-	const healthUrl = normalizeUrl(platform?.env.MUMBLE_PROXY_HEALTH_URL);
+	const healthUrl = normalizeUrl(platform?.env?.MUMBLE_PROXY_HEALTH_URL);
 
 	return {
 		wsUrl: wsUrl ?? deriveProxyUrl(requestUrl, 'ws')!,
-		iceServers: parseIceServers(
-			platform?.env.MUMBLE_PROXY_STUN_SERVERS,
-			platform?.env.MUMBLE_PROXY_TURN_USERNAME,
-			platform?.env.MUMBLE_PROXY_TURN_CREDENTIAL
-		),
+		iceServers: createIceServers(platform),
 		healthUrl:
 			healthUrl && !isBrowserReachableUrl(healthUrl, requestUrl)
 				? null
@@ -141,18 +137,19 @@ export function getMumbleProxyHealthUrl(
 	platform: App.Platform | undefined,
 	requestUrl?: URL
 ): string | null {
-	const explicitUrl = normalizeUrl(platform?.env.MUMBLE_PROXY_HEALTH_URL);
+	const explicitUrl = normalizeUrl(platform?.env?.MUMBLE_PROXY_HEALTH_URL);
 	if (explicitUrl) {
 		return isBrowserReachableUrl(explicitUrl, requestUrl) ? explicitUrl : null;
 	}
 
-	const config = getMumbleProxyConfig(platform, requestUrl);
-	if (!config) {
+	const wsUrl =
+		normalizeUrl(platform?.env?.MUMBLE_PROXY_WS_URL) ?? deriveProxyUrl(requestUrl, 'ws');
+	if (!wsUrl || !isBrowserReachableUrl(wsUrl, requestUrl)) {
 		return null;
 	}
 
 	try {
-		const url = new URL(config.wsUrl);
+		const url = new URL(wsUrl);
 		url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
 		url.pathname = url.pathname.endsWith('/ws')
 			? `${url.pathname.slice(0, -3)}/health`

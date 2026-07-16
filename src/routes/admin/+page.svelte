@@ -14,18 +14,19 @@
 	import DownloadEditModal from '$lib/components/DownloadEditModal.svelte';
 	import AnnouncementForm from '$lib/components/AnnouncementForm.svelte';
 	import MumbleStatusPanel from '$lib/components/MumbleStatusPanel.svelte';
+	import { preloadTurnstileScript } from '$lib/utils/turnstile-client';
 
 	// Tab 状态
 	let adminTab = $state<'downloads' | 'categories' | 'announcements' | 'mumble'>('downloads');
-	let adminToken = $state('');
 
 	// 认证状态
 	let isAuthenticated = $state(false);
+	let initialTurnstileRequired = $state(false);
+	let initialTurnstileSiteKey = $state('');
 
 	// 数据状态
 	let downloads = $state<DownloadItem[]>([]);
 	let categories = $state<Category[]>([]);
-	let downloadCount = $state(0);
 	let loading = $state(true);
 	let error = $state('');
 	let success = $state('');
@@ -33,20 +34,48 @@
 	// 编辑状态
 	let editingItem = $state<DownloadItem | null>(null);
 
-	// 登出
-	function handleLogout() {
-		localStorage.removeItem('admin_token');
+	interface LoadDownloadsOptions {
+		silent?: boolean;
+	}
+
+	function clearAdminState() {
+		downloads = [];
+		categories = [];
+		editingItem = null;
 		isAuthenticated = false;
+	}
+
+	// 登出；只有服务端确认 Cookie 已清除后才切换本地状态。
+	async function handleLogout() {
+		try {
+			const response = await fetch('/api/admin/auth', { method: 'DELETE' });
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			clearAdminState();
+			error = '';
+		} catch {
+			error = '退出登录失败，请检查网络后重试';
+		}
 	}
 
 	// 检查是否已登录
 	async function checkAuth() {
-		const token = localStorage.getItem('admin_token');
-		if (token) {
-			isAuthenticated = true;
-			adminToken = token;
-			await Promise.all([loadDownloads(), loadCategories()]);
-		} else {
+		try {
+			const response = await fetch('/api/admin/auth');
+			const data: ApiResponse<{
+				authenticated?: boolean;
+				requireTurnstile?: boolean;
+				siteKey?: string;
+			}> = await response.json();
+			if (data.success && data.data?.authenticated === true) {
+				isAuthenticated = true;
+				await Promise.all([loadDownloads(), loadCategories()]);
+				return;
+			}
+			initialTurnstileRequired = data.data?.requireTurnstile === true;
+			initialTurnstileSiteKey = initialTurnstileRequired ? data.data?.siteKey || '' : '';
+		} catch {
+			error = '无法检查登录状态';
+		} finally {
 			loading = false;
 		}
 	}
@@ -54,51 +83,51 @@
 	// 处理登录成功
 	function handleLoginSuccess() {
 		isAuthenticated = true;
-		adminToken = localStorage.getItem('admin_token') ?? '';
-		loadDownloads();
-		loadCategories();
+		void Promise.all([loadDownloads(), loadCategories()]);
 	}
 
 	// 加载下载列表
-	async function loadDownloads() {
-		loading = true;
-		error = '';
+	async function loadDownloads(
+		options: LoadDownloadsOptions = {}
+	): Promise<DownloadItem[] | undefined> {
+		const silent = options.silent === true;
+		if (!silent) {
+			loading = true;
+			error = '';
+		}
 		try {
-			const token = localStorage.getItem('admin_token');
-			const res = await fetch('/api/admin', {
-				headers: { Authorization: `Bearer ${token}` }
-			});
+			const res = await fetch('/api/admin');
 			const data: ApiResponse<DownloadListData> = await res.json();
 			if (data.success && data.data) {
-				downloads = data.data.items;
-				downloadCount = data.data.downloadCount;
+				const nextDownloads = data.data.items;
+				downloads = nextDownloads;
+				return nextDownloads;
 			} else {
 				if (res.status === 401) {
-					handleLogout();
+					clearAdminState();
 				}
-				error = data.error || '加载失败';
+				if (!silent) error = data.error || '加载失败';
 			}
 		} catch {
-			error = '网络错误';
+			if (!silent) error = '网络错误';
 		} finally {
-			loading = false;
+			if (!silent) loading = false;
 		}
+		return undefined;
 	}
 
 	// 加载分类列表
 	async function loadCategories() {
 		try {
-			const token = localStorage.getItem('admin_token');
-			const res = await fetch('/api/admin/categories', {
-				headers: { Authorization: `Bearer ${token}` }
-			});
+			const res = await fetch('/api/admin/categories');
 			const data: ApiResponse<CategoryList> = await res.json();
 			if (data.success && data.data) {
 				categories = data.data.items;
 			} else {
 				if (res.status === 401) {
-					handleLogout();
+					clearAdminState();
 				}
+				error = data.error || '加载分类失败';
 			}
 		} catch {
 			console.error('Failed to load categories');
@@ -107,20 +136,22 @@
 
 	// 切换启用状态
 	async function handleToggleEnabled(item: DownloadItem) {
+		error = '';
 		try {
-			const token = localStorage.getItem('admin_token');
 			const res = await fetch('/api/admin', {
 				method: 'PUT',
-				headers: {
-					'Content-Type': 'application/json',
-					...(token ? { Authorization: `Bearer ${token}` } : {})
-				},
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ id: item.id, enabled: !item.enabled })
 			});
 
 			const data: ApiResponse<DownloadItem> = await res.json();
-			if (data.success && data.data) {
+			if (res.ok && data.success && data.data) {
 				downloads = downloads.map((d) => (d.id === item.id ? data.data! : d));
+			} else if (res.status === 401) {
+				clearAdminState();
+				error = '登录已过期，请重新登录';
+			} else {
+				error = data.error || `更新失败（HTTP ${res.status}）`;
 			}
 		} catch {
 			error = '更新失败';
@@ -132,13 +163,9 @@
 		if (!confirm('确定要删除吗？')) return;
 
 		try {
-			const token = localStorage.getItem('admin_token');
 			const res = await fetch('/api/admin', {
 				method: 'DELETE',
-				headers: {
-					'Content-Type': 'application/json',
-					...(token ? { Authorization: `Bearer ${token}` } : {})
-				},
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ id })
 			});
 
@@ -173,25 +200,35 @@
 
 	// 初始加载
 	$effect(() => {
-		checkAuth();
+		preloadTurnstileScript();
+		void checkAuth();
 	});
 </script>
 
 <svelte:head>
+	<link rel="preconnect" href="https://challenges.cloudflare.com" />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
-		href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap"
+		href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap"
+		rel="stylesheet"
+	/>
+	<link
+		href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700&display=swap"
 		rel="stylesheet"
 	/>
 	<title>Admin - PlayDota2Win</title>
 </svelte:head>
 
 {#if !isAuthenticated}
-	<AdminLogin onLoginSuccess={handleLoginSuccess} />
+	<AdminLogin
+		onLoginSuccess={handleLoginSuccess}
+		{initialTurnstileRequired}
+		{initialTurnstileSiteKey}
+	/>
 {:else}
 	<div class="admin-container">
-		<AdminHeader {downloadCount} itemCount={downloads.length} onLogout={handleLogout} />
+		<AdminHeader itemCount={downloads.length} onLogout={handleLogout} />
 
 		{#if error}
 			<div class="alert alert-error">
@@ -277,7 +314,7 @@
 		{/if}
 
 		{#if adminTab === 'announcements'}
-			<AnnouncementForm token={adminToken} />
+			<AnnouncementForm />
 		{/if}
 
 		{#if adminTab === 'mumble'}

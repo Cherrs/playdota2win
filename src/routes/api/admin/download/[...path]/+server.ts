@@ -1,16 +1,17 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { verifySignedUrl } from '$lib/admin-auth';
-import { buildContentDisposition } from '$lib/utils/filename';
+import { createR2DownloadResponse } from '$lib/server/r2-download';
+import { isManagedUploadKey } from '$lib/server/download-object';
 
 // 提供 R2 存储的文件下载
 export const GET: RequestHandler = async ({ params, platform, request }) => {
 	try {
-		const r2 = platform?.env.UPLOADS_BUCKET;
+		const r2 = platform?.env?.UPLOADS_BUCKET;
 		if (!r2) {
 			return new Response('R2 not available', { status: 500 });
 		}
 
-		const signingSecret = platform?.env.ADMIN_SIGNING_SECRET;
+		const signingSecret = platform?.env?.ADMIN_SIGNING_SECRET;
 		if (!signingSecret) {
 			return new Response('Signing secret not configured', { status: 500 });
 		}
@@ -25,24 +26,19 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 			return new Response('Path is required', { status: 400 });
 		}
 
-		if (key.includes('..') || key.startsWith('/') || key.includes('\\')) {
+		if (!isManagedUploadKey(key)) {
 			return new Response('Invalid key', { status: 400 });
 		}
 
-		const object = await r2.get(key);
-		if (!object) {
-			return new Response('File not found', { status: 404 });
-		}
-
-		const headers = new Headers();
-		object.writeHttpMetadata(headers);
-		headers.set('etag', object.httpEtag);
-
-		// 设置下载文件名
-		const filename = key.split('/').pop() || 'download';
-		headers.set('Content-Disposition', buildContentDisposition(filename));
-
-		return new Response(object.body, { headers });
+		const response = await createR2DownloadResponse(r2, key, request, {
+			fallbackFilename: key.split('/').pop() || 'download',
+			headers: {
+				'Cache-Control': 'private, no-store',
+				'X-Content-Type-Options': 'nosniff',
+				'Referrer-Policy': 'no-referrer'
+			}
+		});
+		return response || new Response('File not found', { status: 404 });
 	} catch (error) {
 		console.error('Error serving file:', error);
 		return new Response('Failed to serve file', { status: 500 });

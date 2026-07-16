@@ -7,12 +7,6 @@
 	} from '$lib/types';
 	import '$lib/styles/admin-form.css';
 
-	interface Props {
-		token: string;
-	}
-
-	let { token }: Props = $props();
-
 	let announcements = $state<Announcement[]>([]);
 	let loading = $state(true);
 	let error = $state('');
@@ -26,17 +20,12 @@
 	let formPinned = $state(false);
 	let submitting = $state(false);
 
-	const authHeaders = $derived({
-		Authorization: `Bearer ${token}`,
-		'Content-Type': 'application/json'
-	});
+	const jsonHeaders = { 'Content-Type': 'application/json' } as const;
 
 	async function loadAnnouncements() {
 		loading = true;
 		try {
-			const res = await fetch('/api/admin/announcements', {
-				headers: { Authorization: `Bearer ${token}` }
-			});
+			const res = await fetch('/api/admin/announcements');
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data: ApiResponse<AnnouncementList> = await res.json();
 			if (data.success && data.data) {
@@ -86,7 +75,7 @@
 			const method = editingId ? 'PUT' : 'POST';
 			const res = await fetch('/api/admin/announcements', {
 				method,
-				headers: authHeaders,
+				headers: jsonHeaders,
 				body: JSON.stringify(body)
 			});
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -112,7 +101,7 @@
 		try {
 			const res = await fetch('/api/admin/announcements', {
 				method: 'PUT',
-				headers: authHeaders,
+				headers: jsonHeaders,
 				body: JSON.stringify({ id: item.id, visible: !item.visible })
 			});
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -130,7 +119,7 @@
 		try {
 			const res = await fetch('/api/admin/announcements', {
 				method: 'PUT',
-				headers: authHeaders,
+				headers: jsonHeaders,
 				body: JSON.stringify({ id: item.id, pinned: !item.pinned })
 			});
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -149,7 +138,7 @@
 		try {
 			const res = await fetch('/api/admin/announcements', {
 				method: 'DELETE',
-				headers: authHeaders,
+				headers: jsonHeaders,
 				body: JSON.stringify({ id })
 			});
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -169,7 +158,7 @@
 	}
 
 	$effect(() => {
-		if (token) loadAnnouncements();
+		void loadAnnouncements();
 	});
 </script>
 
@@ -203,8 +192,7 @@
 				bind:value={formContent}
 				placeholder="支持 **加粗**、[链接](url)、- 列表等 Markdown 格式"
 				class="form-textarea admin-input"
-				rows="5"
-			></textarea>
+				rows="5"></textarea>
 		</div>
 		<div class="form-row">
 			<label class="checkbox-label">

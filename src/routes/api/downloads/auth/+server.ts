@@ -1,50 +1,15 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import type { ApiResponse } from '$lib/types';
-import {
-	verifyDownloadPassword,
-	verifyDownloadToken,
-	generateDownloadToken,
-	saveDownloadToken
-} from '$lib/auth';
 
-// GET: 检查 token 是否有效
-export const GET: RequestHandler = async ({ request, platform }) => {
-	const kv = platform?.env.APP_KV;
-	const token = request.headers.get('X-Download-Token');
+const gone = () =>
+	json({ success: false, error: '该接口已停用，请使用下载链接接口' } satisfies ApiResponse, {
+		status: 410,
+		headers: { 'Cache-Control': 'no-store' }
+	});
 
-	const isValid = await verifyDownloadToken(token, kv, undefined, platform?.env);
+// 无状态下载 token 必须和完整 R2 对象路径一起验证，不提供 token oracle。
+export const GET: RequestHandler = async () => gone();
 
-	return json({
-		success: true,
-		data: { authenticated: isValid }
-	} satisfies ApiResponse<{ authenticated: boolean }>);
-};
-
-// POST: 密码验证
-export const POST: RequestHandler = async ({ request, platform }) => {
-	try {
-		const { password } = (await request.json()) as { password: string };
-
-		if (!password) {
-			return json({ success: false, error: '请输入密码' } satisfies ApiResponse, { status: 400 });
-		}
-
-		const isValid = verifyDownloadPassword(password, platform?.env);
-
-		if (!isValid) {
-			return json({ success: false, error: '密码错误' } satisfies ApiResponse, { status: 401 });
-		}
-
-		// 生成并保存 token
-		const token = generateDownloadToken();
-		await saveDownloadToken(token, platform?.env.APP_KV);
-
-		return json({
-			success: true,
-			data: { token }
-		} satisfies ApiResponse<{ token: string }>);
-	} catch (error) {
-		console.error('Error verifying download password:', error);
-		return json({ success: false, error: '验证失败' } satisfies ApiResponse, { status: 500 });
-	}
-};
+// 旧版密码接口会绕过失败计数和 Turnstile，禁止继续签发未绑定文件的 token。
+// 下载认证统一由 POST /api/downloads/link 完成。
+export const POST: RequestHandler = async () => gone();

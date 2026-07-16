@@ -1,13 +1,14 @@
 <script lang="ts">
-	import type { DownloadItem, Platform } from '$lib/types';
+	import type { Platform, PublicDownloadItem } from '$lib/types';
 	import { parseGuideSteps, getGuideAction } from '$lib/utils/markdown';
 
 	interface Props {
-		item: DownloadItem | null;
+		item: PublicDownloadItem | null;
+		configGuide: string;
 		message: string;
 	}
 
-	let { item, message }: Props = $props();
+	let { item, configGuide, message }: Props = $props();
 
 	// Use derived for the base message, with local override capability
 	let displayMessage = $derived(message);
@@ -15,6 +16,7 @@
 
 	// Computed display value
 	let shownMessage = $derived(localOverride ?? displayMessage);
+	let guideSteps = $derived(parseGuideSteps(configGuide));
 
 	// Reset override when parent message changes
 	$effect(() => {
@@ -65,9 +67,9 @@
 		{/if}
 	</div>
 	<p class="guide-message">{shownMessage}</p>
-	{#if item && parseGuideSteps(item.configGuide).length > 0}
+	{#if item && guideSteps.length > 0}
 		<ol class="guide-steps">
-			{#each parseGuideSteps(item.configGuide) as step (step)}
+			{#each guideSteps as step, index (`${index}-${step}`)}
 				{@const action = getGuideAction(step)}
 				<li>
 					<div class="guide-step-text">{step}</div>
@@ -165,6 +167,11 @@
 		box-shadow: 0 8px 18px rgba(255, 107, 157, 0.35);
 	}
 
+	.guide-action:focus-visible {
+		outline: 3px solid rgba(107, 76, 154, 0.28);
+		outline-offset: 2px;
+	}
+
 	.guide-empty {
 		text-align: center;
 		color: #8b7ba8;
@@ -179,5 +186,36 @@
 
 	.guide-empty p {
 		margin: 0;
+	}
+
+	@media (max-width: 480px) {
+		.guide-panel {
+			padding: 1rem;
+			border-radius: 16px;
+		}
+
+		.guide-steps {
+			padding-left: 1.25rem;
+		}
+
+		.guide-steps li {
+			align-items: stretch;
+		}
+
+		.guide-step-text {
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.guide-action {
+			transition: none;
+		}
+
+		.guide-action:hover {
+			transform: none;
+			box-shadow: none;
+		}
 	}
 </style>

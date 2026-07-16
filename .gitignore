@@ -11,6 +11,7 @@ node_modules
 # OS
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
 
 # Env
 .env
@@ -29,3 +30,6 @@ vite.config.ts.timestamp-*
 .opencode
 .specify
 .shared
+
+# Local deployment configuration
+mumble.yaml

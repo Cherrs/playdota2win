@@ -23,7 +23,7 @@
 	let nickname = $state('');
 	let nicknameDraft = $state('');
 	let editingNickname = $state(false);
-	let loadingConfig = $state(true);
+	let loadingConfig = $state(false);
 	let configError = $state('');
 	let nicknameKeywords = $state<string[]>([]);
 	let clientState = $state<MumbleClientSnapshot>(createInitialMumbleClientSnapshot());
@@ -37,10 +37,12 @@
 	let statusCollapsed = $state(false);
 	let channelCollapsed = $state(false);
 
-	let client: ReturnType<typeof createMumbleClient> | null = null;
+	let client = $state.raw<ReturnType<typeof createMumbleClient> | null>(null);
 	let unsubscribeClient: (() => void) | null = null;
 	let previewTimer: ReturnType<typeof setTimeout> | null = null;
 	let animateTimer: ReturnType<typeof setTimeout> | null = null;
+	let initialization: Promise<void> | null = null;
+	let destroyed = false;
 
 	const channelOptions = $derived(buildChannelOptions(clientState.channels));
 	const currentChannelUsers = $derived(
@@ -83,7 +85,7 @@
 		try {
 			const res = await fetch('/api/chat/nicknames');
 			const data: ApiResponse<NicknameKeywordList> = await res.json();
-			if (data.success && data.data) {
+			if (res.ok && data.success && data.data) {
 				return data.data.keywords;
 			}
 		} catch {
@@ -96,16 +98,63 @@
 		try {
 			const res = await fetch('/api/mumble/config');
 			const data: ApiResponse<MumbleProxyConfig> = await res.json();
-			if (data.success && data.data) {
+			if (res.ok && data.success && data.data) {
 				return data.data;
 			}
 			configError = data.error || 'Mumble 代理暂不可用';
 		} catch {
 			configError = '无法读取 Mumble 代理配置';
-		} finally {
-			loadingConfig = false;
 		}
 		return null;
+	}
+
+	function prepareNickname(): void {
+		if (nickname) return;
+		const savedNickname = localStorage.getItem(NICKNAME_STORAGE_KEY);
+		const normalizedNickname = normalizeClientInput(savedNickname || '').slice(
+			0,
+			MAX_NICKNAME_LENGTH
+		);
+		nickname = normalizedNickname || generateRandomNickname([]);
+		nicknameDraft = nickname;
+		localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
+	}
+
+	async function performClientInitialization(): Promise<void> {
+		loadingConfig = true;
+		configError = '';
+		prepareNickname();
+
+		const [keywords, config] = await Promise.all([fetchNicknameKeywords(), fetchMumbleConfig()]);
+		nicknameKeywords = keywords;
+		if (destroyed || !config) return;
+
+		client = createMumbleClient({
+			config,
+			nickname,
+			mode: 'interactive'
+		});
+		unsubscribeClient = client.state.subscribe(handleSnapshot);
+		client.connect();
+	}
+
+	async function initializeClient(): Promise<void> {
+		if (client) return;
+		if (initialization) return initialization;
+
+		const task = performClientInitialization();
+		initialization = task;
+		try {
+			await task;
+		} finally {
+			if (initialization === task) initialization = null;
+			if (!destroyed) loadingConfig = false;
+		}
+	}
+
+	function handleExpand(): void {
+		expanded = true;
+		void initializeClient();
 	}
 
 	function normalizeClientInput(value: string): string {
@@ -208,7 +257,11 @@
 	}
 
 	function handleReconnect(): void {
-		client?.reconnect();
+		if (client) {
+			client.reconnect();
+			return;
+		}
+		void initializeClient();
 	}
 
 	function handleMessageScroll(): void {
@@ -264,35 +317,10 @@
 	});
 
 	onMount(() => {
-		let cancelled = false;
-
-		(async () => {
-			nicknameKeywords = await fetchNicknameKeywords();
-			const savedNickname = localStorage.getItem(NICKNAME_STORAGE_KEY);
-			const normalizedNickname = normalizeClientInput(savedNickname || '').slice(
-				0,
-				MAX_NICKNAME_LENGTH
-			);
-			nickname = normalizedNickname || generateRandomNickname(nicknameKeywords);
-			nicknameDraft = nickname;
-			localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
-
-			const config = await fetchMumbleConfig();
-			if (!config || cancelled) {
-				return;
-			}
-
-			client = createMumbleClient({
-				config,
-				nickname,
-				mode: 'interactive'
-			});
-			unsubscribeClient = client.state.subscribe(handleSnapshot);
-			client.connect();
-		})();
+		destroyed = false;
 
 		return () => {
-			cancelled = true;
+			destroyed = true;
 			unsubscribeClient?.();
 			client?.destroy();
 			if (previewTimer) {
@@ -307,16 +335,24 @@
 
 <div class="mumble-widget">
 	{#if expanded}
-		<section class="mumble-panel">
+		<section class="mumble-panel" aria-label="Mumble 语音房" aria-busy={loadingConfig}>
 			<header class="mumble-header">
 				<div class="title-group">
 					<h2>Mumble 语音房</h2>
-					<span class="online-pill">在线 {clientState.onlineCount}</span>
+					<span class="online-pill">
+						{loadingConfig ? '连接准备中' : `在线 ${clientState.onlineCount}`}
+					</span>
 				</div>
 
 				<div class="header-actions">
 					{#if clientState.connected || clientState.reconnecting || clientState.status === 'connecting'}
-						<button class="icon-btn ghost" type="button" onclick={handleReconnect} title="重新连接">
+						<button
+							class="icon-btn ghost"
+							type="button"
+							onclick={handleReconnect}
+							title="重新连接"
+							aria-label="重新连接 Mumble"
+						>
 							↻
 						</button>
 						<button
@@ -324,15 +360,28 @@
 							type="button"
 							onclick={() => client?.disconnect()}
 							title="断开连接"
+							aria-label="断开 Mumble 连接"
 						>
 							×
 						</button>
 					{:else}
-						<button class="icon-btn" type="button" onclick={handleReconnect} title="连接">
+						<button
+							class="icon-btn"
+							type="button"
+							onclick={handleReconnect}
+							title="连接"
+							aria-label="连接 Mumble"
+						>
 							⟳
 						</button>
 					{/if}
-					<button class="icon-btn" type="button" onclick={() => (expanded = false)} title="收起">
+					<button
+						class="icon-btn"
+						type="button"
+						onclick={() => (expanded = false)}
+						title="收起"
+						aria-label="收起 Mumble 窗口"
+					>
 						−
 					</button>
 				</div>
@@ -345,6 +394,7 @@
 						class="nickname-input"
 						maxlength={MAX_NICKNAME_LENGTH}
 						bind:value={nicknameDraft}
+						aria-label="Mumble 昵称"
 						onkeydown={(event) => {
 							if (event.key === 'Enter') {
 								saveNickname();
@@ -355,8 +405,12 @@
 					<button class="small-btn ghost" type="button" onclick={cancelNicknameEdit}>取消</button>
 				{:else}
 					<span class="nickname-label">昵称：{nickname}</span>
-					<button class="small-btn ghost" type="button" onclick={randomizeNickname} title="随机昵称"
-						>🎲</button
+					<button
+						class="small-btn ghost"
+						type="button"
+						onclick={randomizeNickname}
+						title="随机昵称"
+						aria-label="生成随机昵称">🎲</button
 					>
 					<button class="small-btn ghost" type="button" onclick={startNicknameEdit}>改名</button>
 				{/if}
@@ -367,8 +421,13 @@
 					class="card-header"
 					type="button"
 					onclick={() => (statusCollapsed = !statusCollapsed)}
+					aria-expanded={!statusCollapsed}
 				>
-					<span class="status-dot" class:active={clientState.connected} class:failed={clientState.voiceFailed}></span>
+					<span
+						class="status-dot"
+						class:active={clientState.connected}
+						class:failed={clientState.voiceFailed}
+					></span>
 					<span class="card-header-title">连接信息</span>
 					<span class="collapse-arrow" class:collapsed={statusCollapsed}>▾</span>
 				</button>
@@ -389,6 +448,7 @@
 					class="card-header"
 					type="button"
 					onclick={() => (channelCollapsed = !channelCollapsed)}
+					aria-expanded={!channelCollapsed}
 				>
 					<span class="card-header-title">当前频道</span>
 					{#if channelCollapsed}
@@ -403,6 +463,7 @@
 						<select
 							id="mumble-channel-select"
 							class="channel-select"
+							aria-label="选择 Mumble 频道"
 							value={clientState.currentChannelId ?? ''}
 							disabled={!clientState.connected || channelOptions.length === 0}
 							onchange={(event) => {
@@ -494,7 +555,12 @@
 				</div>
 			{/if}
 
-			<div class="message-list" bind:this={messagesRef} onscroll={handleMessageScroll}>
+			<div
+				class="message-list"
+				bind:this={messagesRef}
+				onscroll={handleMessageScroll}
+				aria-live="polite"
+			>
 				{#if clientState.messages.length === 0}
 					<p class="empty-text">连接成功后，这里会显示当前会话收到的文字消息。</p>
 				{/if}
@@ -523,6 +589,7 @@
 					placeholder={clientState.connected ? '发送频道文字消息...' : '等待连接完成...'}
 					maxlength={MAX_MESSAGE_LENGTH}
 					bind:value={pendingMessage}
+					aria-label="Mumble 消息"
 					disabled={!clientState.connected}
 					onkeydown={(event) => {
 						if (event.key === 'Enter') {
@@ -554,12 +621,12 @@
 			class="mumble-toggle"
 			class:toggle-shake={animateToggle}
 			type="button"
-			onclick={() => (expanded = true)}
+			onclick={handleExpand}
 			aria-label="打开 Mumble 聊天窗口"
 		>
 			<span class="toggle-emoji">🎧</span>
 			<span class="toggle-text">Mumble 语音</span>
-			<span class="toggle-online">在线 {clientState.onlineCount}</span>
+			<span class="toggle-online">{client ? `在线 ${clientState.onlineCount}` : '按需连接'}</span>
 			{#if unreadCount > 0}
 				<span class="unread-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
 			{/if}
@@ -573,6 +640,7 @@
 		right: 1.2rem;
 		bottom: 1.2rem;
 		z-index: 30;
+		max-width: calc(100vw - 1.4rem);
 	}
 
 	.mumble-toggle {
@@ -596,6 +664,17 @@
 	.mumble-toggle:hover {
 		transform: translateY(-2px);
 		box-shadow: 0 14px 28px rgba(107, 76, 154, 0.33);
+	}
+
+	.mumble-toggle:focus-visible,
+	.icon-btn:focus-visible,
+	.small-btn:focus-visible,
+	.voice-btn:focus-visible,
+	.send-btn:focus-visible,
+	.card-header:focus-visible,
+	.scroll-to-bottom:focus-visible {
+		outline: 3px solid rgba(107, 76, 154, 0.3);
+		outline-offset: 2px;
 	}
 
 	.toggle-emoji {
@@ -639,12 +718,14 @@
 		display: flex;
 		align-items: center;
 		gap: 0.6rem;
+		min-width: 0;
 	}
 
 	.title-group h2 {
 		margin: 0;
 		font-size: 1rem;
 		color: #5a3e87;
+		white-space: nowrap;
 	}
 
 	.online-pill {
@@ -653,6 +734,7 @@
 		background: rgba(255, 255, 255, 0.5);
 		padding: 0.15rem 0.45rem;
 		border-radius: 999px;
+		white-space: nowrap;
 	}
 
 	.header-actions {
@@ -1051,12 +1133,60 @@
 			max-height: min(600px, calc(100vh - 1.4rem));
 		}
 
+		.mumble-header {
+			align-items: flex-start;
+			gap: 0.5rem;
+		}
+
+		.title-group {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 0.25rem;
+		}
+
 		.voice-controls {
 			flex-direction: column;
 		}
 
 		.voice-btn {
 			width: 100%;
+		}
+	}
+
+	@media (max-width: 390px) {
+		.toggle-online {
+			display: none;
+		}
+
+		.nickname-row,
+		.voice-controls,
+		.input-row {
+			padding-left: 0.75rem;
+			padding-right: 0.75rem;
+		}
+
+		.status-card,
+		.channel-card,
+		.hint-card,
+		.message-list {
+			margin-left: 0.75rem;
+			margin-right: 0.75rem;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.mumble-toggle,
+		.collapse-arrow {
+			transition: none;
+		}
+
+		.mumble-toggle:hover {
+			transform: none;
+		}
+
+		.msg-new,
+		.toggle-shake {
+			animation: none;
 		}
 	}
 </style>

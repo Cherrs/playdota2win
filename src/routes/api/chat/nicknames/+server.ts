@@ -4,7 +4,7 @@ import type { ApiResponse, NicknameKeywordList } from '$lib/types';
 const KV_KEY = 'chat_nickname_keywords';
 
 export const GET: RequestHandler = async ({ platform }) => {
-	const kv = platform?.env.APP_KV;
+	const kv = platform?.env?.APP_KV;
 	if (!kv) {
 		return json({
 			success: true,
