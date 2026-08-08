@@ -25,7 +25,7 @@ test('admin authentication accepts only the session cookie contract', async () =
 	assert.equal(await requireAdminAuth(bearerRequest, SECRET), false);
 });
 
-test('uses constant-time secret equality semantics', async () => {
+test('compares equal and unequal secret values', async () => {
 	assert.equal(await timingSafeEqualSecrets('correct', 'correct'), true);
 	assert.equal(await timingSafeEqualSecrets('wrong', 'correct'), false);
 	assert.equal(await timingSafeEqualSecrets('', 'correct'), false);

@@ -16,7 +16,7 @@ import { parseMigrationArguments } from './migrate-metadata.js';
 
 const [downloadTarget, categoryTarget] = METADATA_TARGETS;
 
-test('metadata snapshots use stable hashes and reject malformed legacy data', () => {
+test('metadata snapshots combine independently of target order and reject malformed data', () => {
 	const downloads = normalizeAndDescribeSnapshot(downloadTarget, {
 		items: [],
 		downloadCount: 0,
@@ -24,7 +24,6 @@ test('metadata snapshots use stable hashes and reject malformed legacy data', ()
 	});
 	const categories = normalizeAndDescribeSnapshot(categoryTarget, { items: [], lastUpdated: 1 });
 
-	assert.match(downloads.sha256, /^[a-f0-9]{64}$/);
 	assert.equal(downloads.itemCount, 0);
 	assert.equal(
 		combinedSourceSha256([

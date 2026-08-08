@@ -5,7 +5,7 @@ import { createInitialDownloadCounts, readDownloadCounts } from '$lib/server/dow
 import { readDownloadList } from '$lib/server/download-list-store';
 
 const PUBLIC_CACHE_HEADERS = {
-	'Cache-Control': 'public, max-age=30, stale-while-revalidate=120'
+	'Cache-Control': 'no-store'
 };
 
 // GET: 公开的下载列表 API

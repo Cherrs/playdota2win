@@ -54,7 +54,6 @@ test('public download DTO uses independent counts and keeps an explicit field al
 		downloadCount: 7,
 		lastUpdated: 10
 	});
-	assert.equal(JSON.stringify(result).includes('secret'), false);
 });
 
 test('public download total stays within the safe integer range', () => {

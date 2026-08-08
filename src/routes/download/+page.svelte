@@ -91,7 +91,7 @@
 		loading = true;
 		loadError = '';
 		try {
-			const res = await fetch('/api/downloads');
+			const res = await fetch('/api/downloads', { cache: 'no-store' });
 			const data: ApiResponse<PublicDownloadList> = await res.json();
 			if (res.ok && data.success && data.data) {
 				downloads = data.data.items;
@@ -146,6 +146,7 @@
 				url: string;
 				filename?: string;
 				resolvedSource?: 'origin' | 'r2';
+				downloadCount?: number;
 				configGuide?: string;
 				requireTurnstile?: boolean;
 				siteKey?: string;
@@ -154,11 +155,14 @@
 
 			if (res.ok && data.success && data.data?.url) {
 				applyTurnstileState(data.data);
-				downloadCount += 1;
+				const nextItemDownloadCount =
+					typeof data.data.downloadCount === 'number'
+						? data.data.downloadCount
+						: Math.min(item.downloadCount + 1, Number.MAX_SAFE_INTEGER);
+				const countIncrease = Math.max(nextItemDownloadCount - item.downloadCount, 0);
+				downloadCount = Math.min(downloadCount + countIncrease, Number.MAX_SAFE_INTEGER);
 				downloads = downloads.map((download) =>
-					download.id === item.id
-						? { ...download, downloadCount: download.downloadCount + 1 }
-						: download
+					download.id === item.id ? { ...download, downloadCount: nextItemDownloadCount } : download
 				);
 				const configGuide = typeof data.data.configGuide === 'string' ? data.data.configGuide : '';
 				cacheGuide(item.id, configGuide);

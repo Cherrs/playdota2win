@@ -347,8 +347,12 @@ export const POST: RequestHandler = async ({ request, platform, url: requestUrl 
 			);
 		}
 
+		let itemDownloadCount: number | undefined;
 		if (kv) {
-			const countUpdate = incrementDownloadCount(kv, item).catch((error) => {
+			try {
+				// Finish persistence before replying so an immediate refresh cannot overtake the write.
+				itemDownloadCount = await incrementDownloadCount(kv, item);
+			} catch (error) {
 				console.error({
 					component: 'download_counts',
 					event_name: 'download_count_increment_failed',
@@ -356,12 +360,6 @@ export const POST: RequestHandler = async ({ request, platform, url: requestUrl 
 					item_id: item.id,
 					error_message: error instanceof Error ? error.message : String(error)
 				});
-			});
-
-			if (platform?.ctx) {
-				platform.ctx.waitUntil(countUpdate);
-			} else {
-				await countUpdate;
 			}
 		}
 
@@ -372,6 +370,7 @@ export const POST: RequestHandler = async ({ request, platform, url: requestUrl 
 				filename,
 				configGuide,
 				resolvedSource,
+				...(itemDownloadCount === undefined ? {} : { downloadCount: itemDownloadCount }),
 				...AUTH_RESET_DATA
 			}
 		} satisfies ApiResponse<{
@@ -379,6 +378,7 @@ export const POST: RequestHandler = async ({ request, platform, url: requestUrl 
 			filename: string;
 			configGuide: string;
 			resolvedSource: 'origin' | 'r2';
+			downloadCount?: number;
 			requireTurnstile: false;
 			siteKey: '';
 		}>);
