@@ -30,7 +30,6 @@ export default function CategoryTabs({
 				type="button"
 				aria-pressed={selectedCategoryId === null}
 			>
-				<span className={styles['tab-icon']}>🌟</span>
 				<span className={styles['tab-label']}>全部</span>
 				<span className={styles['tab-count']}>{getEnabledCount()}</span>
 			</button>

@@ -318,9 +318,6 @@ export default function DownloadPage() {
 						</h1>
 						<p className={styles.subtitle}>下载下载下载</p>
 						<div className={styles['download-stats']}>
-							<span className="stats-icon" aria-hidden="true">
-								💝
-							</span>
 							<span className="stats-text">
 								已有 <strong>{downloadCount.toLocaleString()}</strong> 位小伙伴下载
 							</span>

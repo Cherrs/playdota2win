@@ -719,9 +719,6 @@ export default function MumbleWidget() {
 						aria-controls={panelId}
 						aria-label={`打开 Mumble 聊天窗口，${client ? `在线 ${clientState.onlineCount}` : '按需连接'}${unreadCount > 0 ? `，${unreadCount > 99 ? '99 条以上' : `${unreadCount} 条`}未读消息` : ''}`}
 					>
-						<span className={classNames('toggle-emoji')} aria-hidden="true">
-							🎧
-						</span>
 						<span className={classNames('toggle-text')}>Mumble 语音</span>
 						<span className={classNames('toggle-online')}>
 							{client ? `在线 ${clientState.onlineCount}` : '按需连接'}
