@@ -1,0 +1,118 @@
+.list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.item {
+	padding: 1rem 1.25rem;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	background: rgba(255, 255, 255, 0.8);
+	backdrop-filter: blur(8px);
+	border: 2px solid transparent;
+	border-radius: 14px;
+	box-shadow: 0 4px 12px rgba(107, 76, 154, 0.06);
+	cursor: move;
+	transition: all 0.3s ease;
+}
+
+.item:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 8px 20px rgba(107, 76, 154, 0.1);
+}
+
+.item.dragging {
+	opacity: 0.5;
+	transform: scale(0.98);
+}
+
+.item.dragOver {
+	background: linear-gradient(135deg, rgba(255, 214, 232, 0.4), rgba(232, 214, 255, 0.4));
+	border-color: #667eea;
+	box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
+}
+
+.item.disabled {
+	cursor: wait;
+	opacity: 0.75;
+}
+
+.controls {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	flex-shrink: 0;
+}
+
+.orderButton {
+	width: 24px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	border-radius: 6px;
+	background: rgba(107, 76, 154, 0.08);
+	color: #6b4c9a;
+	font: inherit;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.orderButton:disabled {
+	cursor: not-allowed;
+	opacity: 0.35;
+}
+
+.orderButton:focus-visible {
+	outline: 3px solid rgba(107, 76, 154, 0.25);
+	outline-offset: 1px;
+}
+
+.handle {
+	width: 20px;
+	height: 20px;
+	flex-shrink: 0;
+	color: #b8a5d0;
+	transition: color 0.2s ease;
+}
+
+.item:hover .handle {
+	color: #6b4c9a;
+}
+
+.content {
+	min-width: 0;
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+	.item,
+	.handle {
+		align-items: flex-start;
+		padding: 0.9rem;
+	}
+
+	.handle {
+		display: none;
+	}
+
+	.content {
+		align-items: flex-start;
+		flex-wrap: wrap;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.item {
+		transition: none;
+	}
+
+	.item:hover,
+	.item.dragging {
+		transform: none;
+	}
+}

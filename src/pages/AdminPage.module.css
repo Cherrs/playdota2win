@@ -1,0 +1,78 @@
+.adminContainer {
+	min-height: 100vh;
+	background: linear-gradient(135deg, #fff5f7 0%, #f0e6ff 50%, #e6f0ff 100%);
+	font-family: 'Nunito', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+	padding: 2rem;
+}
+
+.alert {
+	max-width: 1000px;
+	margin: 0 auto 1rem;
+	padding: 1rem 1.5rem;
+	border-radius: 12px;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+.alertError {
+	background: rgba(255, 107, 107, 0.15);
+	color: #c8556b;
+}
+.alertSuccess {
+	background: rgba(107, 203, 119, 0.2);
+	color: #2e8b57;
+}
+.alertClose {
+	margin-left: auto;
+	background: none;
+	border: none;
+	color: #8b7ba8;
+	font-size: 1.5rem;
+	cursor: pointer;
+	padding: 0;
+	line-height: 1;
+}
+.adminTabs {
+	display: flex;
+	gap: 0.5rem;
+	max-width: 1000px;
+	margin: 0 auto 1.5rem;
+	border-bottom: 2px solid rgba(107, 76, 154, 0.15);
+	padding-bottom: 0.5rem;
+}
+.tabBtn {
+	padding: 0.5rem 1rem;
+	border: none;
+	background: transparent;
+	border-radius: 12px 12px 0 0;
+	font-size: 0.9rem;
+	font-family: inherit;
+	color: #888;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+.active {
+	background: rgba(107, 76, 154, 0.1);
+	color: #6b4c9a;
+	font-weight: 600;
+}
+.tabBtn:focus-visible {
+	outline: 3px solid rgba(107, 76, 154, 0.22);
+	outline-offset: 2px;
+}
+
+.tabPanel {
+	display: contents;
+}
+
+@media (max-width: 768px) {
+	.adminContainer {
+		padding: 1rem;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tabBtn {
+		transition: none;
+	}
+}

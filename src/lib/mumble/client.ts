@@ -1,4 +1,3 @@
-import { writable, type Readable } from 'svelte/store';
 import type {
 	MumbleChannel,
 	MumbleProxyChannelPayload,
@@ -50,6 +49,30 @@ export interface CreateMumbleClientOptions {
 
 interface ConnectOptions {
 	requestVoice?: boolean;
+}
+
+export interface MumbleClientStateStore {
+	/** Observe state values and receive the current snapshot immediately. */
+	subscribe: (listener: (snapshot: MumbleClientSnapshot) => void) => () => void;
+	getSnapshot: () => MumbleClientSnapshot;
+}
+
+export interface MumbleClient {
+	state: MumbleClientStateStore;
+	/** Notify external-store consumers after each state change. */
+	subscribe: (listener: () => void) => () => void;
+	getSnapshot: () => MumbleClientSnapshot;
+	connect: (connectOptions?: ConnectOptions) => void;
+	reconnect: (connectOptions?: ConnectOptions) => void;
+	disconnect: () => void;
+	destroy: () => void;
+	rename: (nickname: string) => void;
+	sendChat: (message: string) => void;
+	switchChannel: (channelId: number) => void;
+	setMuted: (muted: boolean) => void;
+	setDeafened: (deafened: boolean) => void;
+	ensureVoice: () => Promise<void>;
+	resumeAudioPlayback: () => Promise<void>;
 }
 
 const SOCKET_OPEN = 1;
@@ -173,30 +196,13 @@ function getAudioPermission(error: unknown): MumbleAudioPermission {
 	return 'unknown';
 }
 
-export function createMumbleClient(options: CreateMumbleClientOptions): {
-	state: Readable<MumbleClientSnapshot>;
-	connect: (connectOptions?: ConnectOptions) => void;
-	reconnect: (connectOptions?: ConnectOptions) => void;
-	disconnect: () => void;
-	destroy: () => void;
-	rename: (nickname: string) => void;
-	sendChat: (message: string) => void;
-	switchChannel: (channelId: number) => void;
-	setMuted: (muted: boolean) => void;
-	setDeafened: (deafened: boolean) => void;
-	ensureVoice: () => Promise<void>;
-	resumeAudioPlayback: () => Promise<void>;
-} {
+export function createMumbleClient(options: CreateMumbleClientOptions): MumbleClient {
 	const mode = options.mode ?? 'interactive';
 	const autoReconnect = options.autoReconnect ?? true;
 	const maxMessages = options.maxMessages ?? DEFAULT_MAX_MESSAGES;
 	const maxReconnectAttempts = options.maxReconnectAttempts ?? 10;
-	const store = writable<MumbleClientSnapshot>(createInitialMumbleClientSnapshot());
-
 	let snapshot = createInitialMumbleClientSnapshot();
-	const unsubscribe = store.subscribe((value) => {
-		snapshot = value;
-	});
+	const listeners = new Set<() => void>();
 
 	let nickname = options.nickname;
 	let destroyed = false;
@@ -205,18 +211,42 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let socket: WebSocket | null = null;
 	let peerConnection: RTCPeerConnection | null = null;
+	let peerConnectionGeneration = 0;
 	let localStream: MediaStream | null = null;
+	let voiceRequestGeneration = 0;
+	let voiceRequest: Promise<void> | null = null;
 	let pendingVoiceRequest = false;
 	const remoteAudioElements = new Map<string, HTMLAudioElement>();
 
+	function getSnapshot(): MumbleClientSnapshot {
+		return snapshot;
+	}
+
+	function subscribe(listener: () => void): () => void {
+		listeners.add(listener);
+		return () => listeners.delete(listener);
+	}
+
+	function subscribeWithSnapshot(
+		listener: (nextSnapshot: MumbleClientSnapshot) => void
+	): () => void {
+		const unsubscribe = subscribe(() => listener(snapshot));
+		listener(snapshot);
+		return unsubscribe;
+	}
+
 	function patch(partial: Partial<MumbleClientSnapshot>): void {
-		store.update((current) => ({ ...current, ...partial }));
+		snapshot = { ...snapshot, ...partial };
+		for (const listener of [...listeners]) {
+			listener();
+		}
 	}
 
 	function updateUsers(users: MumbleUser[]): void {
-		const self = snapshot.sessionId
-			? (users.find((user) => user.sessionId === snapshot.sessionId) ?? null)
-			: null;
+		const self =
+			snapshot.sessionId !== null
+				? (users.find((user) => user.sessionId === snapshot.sessionId) ?? null)
+				: null;
 
 		patch({
 			users,
@@ -239,7 +269,13 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			return;
 		}
 
-		socket.send(JSON.stringify(event));
+		try {
+			socket.send(JSON.stringify(event));
+		} catch (error) {
+			patch({
+				errorMessage: `发送 Mumble 消息失败: ${error instanceof Error ? error.message : String(error)}`
+			});
+		}
 	}
 
 	function removeRemoteAudio(streamId: string): void {
@@ -254,7 +290,11 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	}
 
 	function cleanupPeerConnection(stopLocalStream: boolean): void {
+		peerConnectionGeneration += 1;
 		if (peerConnection) {
+			peerConnection.ontrack = null;
+			peerConnection.onicecandidate = null;
+			peerConnection.oniceconnectionstatechange = null;
 			peerConnection.close();
 			peerConnection = null;
 		}
@@ -263,11 +303,15 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			removeRemoteAudio(streamId);
 		}
 
-		if (stopLocalStream && localStream) {
-			for (const track of localStream.getTracks()) {
-				track.stop();
+		if (stopLocalStream) {
+			voiceRequestGeneration += 1;
+			voiceRequest = null;
+			if (localStream) {
+				for (const track of localStream.getTracks()) {
+					track.stop();
+				}
+				localStream = null;
 			}
-			localStream = null;
 		}
 
 		patch({
@@ -279,12 +323,15 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	}
 
 	async function resumeAudioPlayback(): Promise<void> {
+		if (destroyed) return;
+		const generation = peerConnectionGeneration;
 		const results = await Promise.allSettled(
 			Array.from(remoteAudioElements.values()).map((audio) => {
 				audio.muted = snapshot.deafened;
 				return audio.play();
 			})
 		);
+		if (destroyed || generation !== peerConnectionGeneration) return;
 		patch({
 			playbackBlocked: results.some((result) => result.status === 'rejected')
 		});
@@ -315,13 +362,22 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			return;
 		}
 		peerConnection = connection;
+		const generation = ++peerConnectionGeneration;
+		const isCurrent = () =>
+			!destroyed &&
+			generation === peerConnectionGeneration &&
+			peerConnection === connection &&
+			localStream !== null;
 
 		for (const track of localStream.getTracks()) {
 			connection.addTrack(track, localStream);
 		}
 
 		const [audioTransceiver] = connection.getTransceivers();
-		const audioCapabilities = RTCRtpReceiver.getCapabilities('audio');
+		const audioCapabilities =
+			typeof RTCRtpReceiver !== 'undefined' && typeof RTCRtpReceiver.getCapabilities === 'function'
+				? RTCRtpReceiver.getCapabilities('audio')
+				: null;
 		const opusCodecs =
 			audioCapabilities?.codecs.filter((codec) => codec.mimeType.toLowerCase() === 'audio/opus') ??
 			[];
@@ -334,6 +390,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		}
 
 		connection.ontrack = ({ streams }) => {
+			if (!isCurrent()) return;
 			const [stream] = streams;
 			if (!stream || remoteAudioElements.has(stream.id)) {
 				return;
@@ -347,21 +404,23 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			remoteAudioElements.set(stream.id, audio);
 
 			for (const track of stream.getTracks()) {
-				track.addEventListener('ended', () => removeRemoteAudio(stream.id));
+				track.addEventListener('ended', () => {
+					if (remoteAudioElements.get(stream.id) === audio) removeRemoteAudio(stream.id);
+				});
 			}
 
 			void audio.play().then(
 				() => {
-					patch({ playbackBlocked: false });
+					if (isCurrent()) patch({ playbackBlocked: false });
 				},
 				() => {
-					patch({ playbackBlocked: true });
+					if (isCurrent()) patch({ playbackBlocked: true });
 				}
 			);
 		};
 
 		connection.onicecandidate = ({ candidate }) => {
-			if (!candidate) {
+			if (!isCurrent() || !candidate) {
 				return;
 			}
 
@@ -376,6 +435,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		};
 
 		connection.oniceconnectionstatechange = () => {
+			if (!isCurrent()) return;
 			if (
 				connection.iceConnectionState === 'connected' ||
 				connection.iceConnectionState === 'completed'
@@ -399,7 +459,9 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 		try {
 			const offer = await connection.createOffer();
+			if (!isCurrent()) return;
 			await connection.setLocalDescription(offer);
+			if (!isCurrent()) return;
 			if (!offer.sdp) {
 				cleanupPeerConnection(false);
 				patch({
@@ -411,6 +473,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 
 			sendEvent({ type: 'offer', data: { sdp: offer.sdp } });
 		} catch (error) {
+			if (!isCurrent()) return;
 			console.error('WebRTC offer/SDP negotiation failed:', error);
 			cleanupPeerConnection(false);
 			patch({
@@ -420,8 +483,8 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		}
 	}
 
-	async function ensureVoice(): Promise<void> {
-		if (mode !== 'interactive') {
+	async function performVoiceRequest(generation: number): Promise<void> {
+		if (mode !== 'interactive' || destroyed) {
 			return;
 		}
 
@@ -437,8 +500,9 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		patch({ voiceRequested: true });
 
 		if (!localStream) {
+			let acquiredStream: MediaStream;
 			try {
-				localStream = await navigator.mediaDevices.getUserMedia({
+				acquiredStream = await navigator.mediaDevices.getUserMedia({
 					audio: {
 						echoCancellation: true,
 						noiseSuppression: true,
@@ -448,6 +512,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 					}
 				});
 			} catch (error) {
+				if (destroyed || generation !== voiceRequestGeneration) return;
 				patch({
 					voiceAvailable: false,
 					voiceConnected: false,
@@ -456,7 +521,17 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 				});
 				return;
 			}
+
+			if (destroyed || generation !== voiceRequestGeneration) {
+				if (acquiredStream !== localStream) {
+					for (const track of acquiredStream.getTracks()) track.stop();
+				}
+				return;
+			}
+			localStream = acquiredStream;
 		}
+
+		if (destroyed || generation !== voiceRequestGeneration || !localStream) return;
 
 		for (const track of localStream.getAudioTracks()) {
 			track.enabled = !snapshot.muted;
@@ -469,8 +544,36 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		});
 
 		if (snapshot.connected) {
-			await ensurePeerConnection();
+			try {
+				await ensurePeerConnection();
+			} catch (error) {
+				if (destroyed || generation !== voiceRequestGeneration) return;
+				console.error('Failed to initialize WebRTC voice:', error);
+				cleanupPeerConnection(false);
+				patch({
+					voiceFailed: true,
+					errorMessage: '语音通道建立失败，请稍后重试。'
+				});
+			}
 		}
+	}
+
+	function ensureVoice(): Promise<void> {
+		if (mode !== 'interactive' || destroyed) return Promise.resolve();
+		if (voiceRequest) return voiceRequest;
+
+		const generation = ++voiceRequestGeneration;
+		const request = performVoiceRequest(generation);
+		voiceRequest = request;
+		void request.then(
+			() => {
+				if (voiceRequest === request) voiceRequest = null;
+			},
+			() => {
+				if (voiceRequest === request) voiceRequest = null;
+			}
+		);
+		return request;
 	}
 
 	function scheduleReconnect(reason: string): void {
@@ -516,7 +619,11 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 		scheduleReconnect(reason);
 	}
 
-	async function handleSocketMessage(event: MessageEvent<string>): Promise<void> {
+	async function handleSocketMessage(
+		event: MessageEvent<string>,
+		sourceSocket: WebSocket
+	): Promise<void> {
+		if (destroyed || socket !== sourceSocket) return;
 		const parsed = parseServerEvent(event.data);
 		if (!parsed) {
 			return;
@@ -557,18 +664,22 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 					return;
 				}
 
-				try {
-					await peerConnection.setRemoteDescription({
-						type: 'answer',
-						sdp: parsed.data.sdp
-					});
-				} catch (error) {
-					console.error('Failed to set remote description:', error);
-					cleanupPeerConnection(false);
-					patch({
-						voiceFailed: true,
-						errorMessage: '语音协商失败，请重试'
-					});
+				{
+					const connection = peerConnection;
+					try {
+						await connection.setRemoteDescription({
+							type: 'answer',
+							sdp: parsed.data.sdp
+						});
+					} catch (error) {
+						if (destroyed || socket !== sourceSocket || peerConnection !== connection) return;
+						console.error('Failed to set remote description:', error);
+						cleanupPeerConnection(false);
+						patch({
+							voiceFailed: true,
+							errorMessage: '语音协商失败，请重试'
+						});
+					}
 				}
 				return;
 			case 'ice_candidate':
@@ -576,14 +687,18 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 					return;
 				}
 
-				try {
-					await peerConnection.addIceCandidate({
-						candidate: parsed.data.candidate,
-						sdpMid: parsed.data.sdp_mid,
-						sdpMLineIndex: parsed.data.sdp_mline_index
-					});
-				} catch (error) {
-					console.error('Failed to add ICE candidate:', error);
+				{
+					const connection = peerConnection;
+					try {
+						await connection.addIceCandidate({
+							candidate: parsed.data.candidate,
+							sdpMid: parsed.data.sdp_mid,
+							sdpMLineIndex: parsed.data.sdp_mline_index
+						});
+					} catch (error) {
+						if (destroyed || socket !== sourceSocket || peerConnection !== connection) return;
+						console.error('Failed to add ICE candidate:', error);
+					}
 				}
 				return;
 			case 'channel_updated':
@@ -654,20 +769,30 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 			errorMessage: ''
 		});
 
-		const nextSocket = new WebSocket(options.config.wsUrl);
+		let nextSocket: WebSocket;
+		try {
+			nextSocket = new WebSocket(options.config.wsUrl);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : '无法创建 Mumble WebSocket 连接';
+			patch({ errorMessage: reason });
+			scheduleReconnect(reason);
+			return;
+		}
 		socket = nextSocket;
 
 		nextSocket.onopen = () => {
+			if (destroyed || socket !== nextSocket) return;
 			sendEvent({ type: 'connect', data: { username: nickname } });
 		};
 
 		nextSocket.onmessage = (event) => {
 			if (typeof event.data === 'string') {
-				void handleSocketMessage(event);
+				void handleSocketMessage(event, nextSocket);
 			}
 		};
 
 		nextSocket.onerror = () => {
+			if (destroyed || socket !== nextSocket) return;
 			patch({
 				errorMessage: snapshot.connected ? snapshot.errorMessage : '连接 Mumble 代理时发生错误。'
 			});
@@ -782,9 +907,12 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	}
 
 	function destroy(): void {
+		if (destroyed) {
+			return;
+		}
 		destroyed = true;
 		disconnect();
-		unsubscribe();
+		listeners.clear();
 	}
 
 	function rename(nextNickname: string): void {
@@ -841,7 +969,9 @@ export function createMumbleClient(options: CreateMumbleClientOptions): {
 	}
 
 	return {
-		state: { subscribe: store.subscribe },
+		state: { subscribe: subscribeWithSnapshot, getSnapshot },
+		subscribe,
+		getSnapshot,
 		connect,
 		reconnect,
 		disconnect,

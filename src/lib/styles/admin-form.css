@@ -1,6 +1,6 @@
 /* Admin panel shared design tokens and utility classes.
    Import in any admin component:  import '$lib/styles/admin-form.css';
-   Svelte deduplicates the import so it is only bundled once.
+   Vite deduplicates the import so it is only bundled once.
 */
 
 :root {

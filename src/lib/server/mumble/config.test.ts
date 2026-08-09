@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import type { RuntimePlatform } from '../../runtime.ts';
 import { getMumbleProxyConfig, getMumbleProxyHealthUrl } from './config.ts';
 
 test('derives proxy endpoints from the request URL when env vars are missing', async () => {
@@ -32,7 +33,7 @@ test('ignores invalid STUN server URLs from env', async () => {
 			MUMBLE_PROXY_STUN_SERVERS:
 				'127.0.0.1:3478, stun:stun.cloudflare.com:3478, not-a-url, turns:turn.example.com:5349?transport=tcp'
 		}
-	} as App.Platform;
+	} as RuntimePlatform;
 
 	assert.deepEqual(await getMumbleProxyConfig(platform, requestUrl), {
 		wsUrl: 'wss://playdota2.win:8080/ws',
@@ -47,7 +48,7 @@ test('falls back to the default STUN server when env only contains invalid URLs'
 		env: {
 			MUMBLE_PROXY_STUN_SERVERS: '127.0.0.1:3478, invalid-entry'
 		}
-	} as App.Platform;
+	} as RuntimePlatform;
 
 	assert.deepEqual(await getMumbleProxyConfig(platform, requestUrl), {
 		wsUrl: 'wss://playdota2.win:8080/ws',
@@ -65,7 +66,7 @@ test('attaches long-lived TURN credentials only to turn/turns URLs', async () =>
 			MUMBLE_PROXY_TURN_USERNAME: 'turn-user',
 			MUMBLE_PROXY_TURN_CREDENTIAL: 'turn-password'
 		}
-	} as App.Platform;
+	} as RuntimePlatform;
 
 	assert.deepEqual(await getMumbleProxyConfig(platform, requestUrl), {
 		wsUrl: 'wss://playdota2.win:8080/ws',
@@ -101,7 +102,7 @@ test('omits unusable TURN servers when long-lived credentials are incomplete', a
 			MUMBLE_PROXY_TURN_CREDENTIAL: 'turn-password'
 		}
 	]) {
-		assert.deepEqual(await getMumbleProxyConfig({ env } as App.Platform, requestUrl), {
+		assert.deepEqual(await getMumbleProxyConfig({ env } as RuntimePlatform, requestUrl), {
 			wsUrl: 'wss://playdota2.win:8080/ws',
 			iceServers: [{ urls: 'stun:stun.example.com:3478' }],
 			healthUrl: 'https://playdota2.win:8080/health'
@@ -116,7 +117,7 @@ test('rejects loopback proxy endpoints for public browser requests', async () =>
 			MUMBLE_PROXY_WS_URL: 'ws://127.0.0.1:8080/ws',
 			MUMBLE_PROXY_HEALTH_URL: 'http://127.0.0.1:8080/health'
 		}
-	} as App.Platform;
+	} as RuntimePlatform;
 
 	assert.equal(await getMumbleProxyConfig(platform, requestUrl), null);
 	assert.equal(getMumbleProxyHealthUrl(platform, requestUrl), null);

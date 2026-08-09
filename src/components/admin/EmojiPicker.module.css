@@ -1,0 +1,124 @@
+.picker {
+	padding: 1rem;
+	background: rgba(255, 255, 255, 0.9);
+	border: 1px solid rgba(107, 76, 154, 0.08);
+	border-radius: 16px;
+	box-shadow: 0 8px 24px rgba(107, 76, 154, 0.1);
+}
+
+.tabs {
+	margin-bottom: 1rem;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.tab {
+	padding: 0.4rem 0.8rem;
+	border: none;
+	border-radius: 8px;
+	background: rgba(107, 76, 154, 0.08);
+	color: #8b7ba8;
+	font: inherit;
+	font-size: 0.85rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.tab:hover {
+	background: rgba(107, 76, 154, 0.15);
+	color: #6b4c9a;
+}
+
+.tab.active {
+	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	color: white;
+	box-shadow: 0 4px 12px rgba(102, 126, 234, 0.25);
+}
+
+.grid {
+	max-height: 240px;
+	margin-bottom: 1rem;
+	padding: 0.25rem;
+	display: grid;
+	grid-template-columns: repeat(6, 1fr);
+	gap: 0.5rem;
+	overflow-y: auto;
+}
+
+.grid::-webkit-scrollbar {
+	width: 6px;
+}
+
+.grid::-webkit-scrollbar-thumb {
+	background-color: #b8a5d0;
+	border-radius: 3px;
+}
+
+.emoji {
+	aspect-ratio: 1;
+	padding: 0.5rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 2px solid transparent;
+	border-radius: 12px;
+	background: rgba(255, 255, 255, 0.8);
+	font-size: 1.8rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.emoji:hover,
+.emoji.hovered {
+	transform: scale(1.15);
+	background: rgba(255, 240, 247, 0.9);
+	border-color: rgba(107, 76, 154, 0.2);
+	box-shadow: 0 4px 12px rgba(107, 76, 154, 0.15);
+}
+
+.emoji.selected {
+	background: linear-gradient(135deg, #ffd6e8 0%, #e8d6ff 100%);
+	border-color: #6b4c9a;
+	box-shadow: 0 6px 16px rgba(107, 76, 154, 0.25);
+}
+
+.preview {
+	padding: 0.75rem 1rem;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	background: rgba(107, 76, 154, 0.05);
+	border: 1px dashed rgba(107, 76, 154, 0.2);
+	border-radius: 12px;
+}
+
+.previewLabel {
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: #8b7ba8;
+}
+
+.previewEmoji {
+	font-size: 1.8rem;
+}
+
+.clear {
+	width: 24px;
+	height: 24px;
+	margin-left: auto;
+	border: none;
+	border-radius: 50%;
+	background: rgba(107, 76, 154, 0.1);
+	color: #6b4c9a;
+	font-size: 1.2rem;
+	line-height: 1;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.clear:hover {
+	background: rgba(107, 76, 154, 0.2);
+	transform: scale(1.1);
+}

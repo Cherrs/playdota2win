@@ -9,7 +9,8 @@ bun.lockb
 /static/
 src/worker-configuration.d.ts
 
-# Legacy standalone/reference files are not part of the SvelteKit build.
+# Legacy standalone/reference files are not part of the application build.
 /client.html
 /frontend-api.md
 /docs/plans/
+/dist/

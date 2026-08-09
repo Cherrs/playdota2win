@@ -1,4 +1,5 @@
 import { timingSafeEqualSecrets } from './admin-auth.ts';
+import type { RuntimeEnvironment } from './runtime.ts';
 
 export const DOWNLOAD_TOKEN_EXPIRY = 5 * 60 * 1000; // 5 minutes
 
@@ -10,7 +11,7 @@ const encoder = new TextEncoder();
  */
 export async function verifyDownloadPassword(
 	password: string,
-	env: App.Platform['env'] | undefined
+	env: RuntimeEnvironment | undefined
 ): Promise<boolean> {
 	const downloadPassword = env?.DOWNLOAD_PASSWORD;
 	if (!downloadPassword) return false;

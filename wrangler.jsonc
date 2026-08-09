@@ -5,14 +5,15 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "playdota2win",
-	"main": ".svelte-kit/cloudflare/_worker.js",
+	"main": "worker/index.ts",
 	"compatibility_date": "2026-07-13",
 	"compatibility_flags": ["nodejs_als", "nodejs_compat", "global_fetch_strictly_public"],
 	"keep_vars": true,
 	"minify": true,
 	"assets": {
 		"binding": "ASSETS",
-		"directory": ".svelte-kit/cloudflare"
+		"not_found_handling": "single-page-application",
+		"run_worker_first": true
 	},
 	"observability": {
 		"enabled": true,
@@ -35,7 +36,8 @@
 	"kv_namespaces": [
 		{
 			"binding": "APP_KV",
-			"id": "f2e0a96f51484204b4a3253bd4d17772"
+			"id": "f2e0a96f51484204b4a3253bd4d17772",
+			"remote": true
 		}
 	],
 	/**
@@ -45,7 +47,8 @@
 	"r2_buckets": [
 		{
 			"binding": "UPLOADS_BUCKET",
-			"bucket_name": "downloads"
+			"bucket_name": "downloads",
+			"remote": true
 		}
 	],
 	"vars": {

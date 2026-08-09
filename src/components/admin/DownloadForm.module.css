@@ -1,0 +1,218 @@
+.formSection {
+	max-width: 1000px;
+	margin: 0 auto 2rem;
+	background: rgba(255, 255, 255, 0.85);
+	backdrop-filter: blur(10px);
+	border-radius: 20px;
+	padding: 2rem;
+	box-shadow: 0 8px 25px rgba(107, 76, 154, 0.12);
+}
+
+.formSection h2 {
+	font-family: 'Fredoka', sans-serif;
+	color: #6b4c9a;
+	margin: 0 0 1.5rem;
+	font-size: 1.5rem;
+}
+
+.alert {
+	padding: 1rem 1.5rem;
+	border-radius: 12px;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-bottom: 1rem;
+	overflow-wrap: anywhere;
+}
+.alertError {
+	background: rgba(255, 107, 107, 0.15);
+	color: #c8556b;
+}
+.alertSuccess {
+	background: rgba(107, 203, 119, 0.2);
+	color: #2e8b57;
+}
+.alertClose {
+	margin-left: auto;
+	background: none;
+	border: none;
+	color: #8b7ba8;
+	font-size: 1.5rem;
+	cursor: pointer;
+	padding: 0;
+	line-height: 1;
+}
+.formGrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 1rem;
+	margin-bottom: 1rem;
+}
+.formGroup {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+.fullWidth {
+	grid-column: 1 / -1;
+}
+.formGroup label {
+	font-weight: 600;
+	color: #6b4c9a;
+	font-size: 0.9rem;
+}
+.formGroup input,
+.formGroup select,
+.formGroup textarea {
+	box-sizing: border-box;
+	min-width: 0;
+	width: 100%;
+	padding: 0.75rem 1rem;
+	border: 2px solid #e6e0f0;
+	border-radius: 12px;
+	font-size: 1rem;
+	font-family: inherit;
+	transition: all 0.3s ease;
+}
+.formGroup input:focus,
+.formGroup select:focus,
+.formGroup textarea:focus {
+	outline: none;
+	border-color: #6b4c9a;
+	box-shadow: 0 0 0 3px rgba(107, 76, 154, 0.15);
+}
+.formGroup textarea {
+	min-height: 80px;
+	resize: vertical;
+}
+.fieldHint {
+	font-size: 0.8rem;
+	color: #a89bc4;
+	margin: 0;
+}
+.fileInfo {
+	font-size: 0.9rem;
+	color: #6b4c9a;
+	margin-top: 0.5rem;
+	overflow-wrap: anywhere;
+}
+.s3Config {
+	background: rgba(107, 76, 154, 0.05);
+	border-radius: 12px;
+	padding: 1.5rem;
+	margin: 1rem 0;
+}
+.s3Config h3 {
+	margin: 0 0 1rem;
+	font-size: 1.1rem;
+	color: #6b4c9a;
+}
+.rustdeskConfig {
+	background: rgba(0, 150, 136, 0.06);
+	border: 1px solid rgba(0, 150, 136, 0.12);
+	border-radius: 12px;
+	padding: 1rem;
+	margin: 1rem 0;
+}
+.checkboxLabel {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-weight: 600;
+	color: #2f7f77;
+	cursor: pointer;
+}
+.checkboxLabel input {
+	width: 16px;
+	height: 16px;
+}
+.rustdeskGrid {
+	margin: 1rem 0 0;
+}
+.formActions {
+	display: flex;
+	gap: 1rem;
+	margin-top: 1.5rem;
+}
+.btn {
+	padding: 0.75rem 1.5rem;
+	border: none;
+	border-radius: 12px;
+	font-family: inherit;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+.btnPrimary {
+	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	color: white;
+}
+.btnPrimary:hover:not(:disabled) {
+	transform: translateY(-2px);
+	box-shadow: 0 8px 20px rgba(102, 126, 234, 0.35);
+}
+.btnSecondary {
+	background: rgba(107, 76, 154, 0.1);
+	color: #6b4c9a;
+}
+.btnSecondary:hover {
+	background: rgba(107, 76, 154, 0.2);
+}
+.btn:disabled {
+	opacity: 0.7;
+	cursor: not-allowed;
+}
+.spinner {
+	width: 16px;
+	height: 16px;
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	border-top-color: white;
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
+	display: inline-block;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (max-width: 640px) {
+	.formSection {
+		padding: 1rem;
+		border-radius: 16px;
+	}
+	.formGrid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.s3Config {
+		padding: 1rem;
+	}
+	.formActions {
+		flex-wrap: wrap;
+	}
+	.formActions .btn {
+		flex: 1 1 9rem;
+		justify-content: center;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.btn,
+	.formGroup input,
+	.formGroup select,
+	.formGroup textarea {
+		transition: none;
+	}
+	.btnPrimary:hover:not(:disabled) {
+		transform: none;
+		box-shadow: none;
+	}
+	.spinner {
+		animation: none;
+	}
+}

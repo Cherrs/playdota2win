@@ -1,7 +1,9 @@
 # playdota2win
 
-SvelteKit application deployed on Cloudflare Workers, with KV metadata, R2 downloads,
-Turnstile-protected forms, and a WebRTC/Mumble proxy.
+React 19 and Vite application deployed on Cloudflare Workers, with canonical R2 metadata, KV
+download counters, protected R2 downloads, Turnstile-protected forms, and a WebRTC/Mumble proxy.
+The browser UI is a React Router SPA; framework-independent HTTP handlers run from
+`worker/index.ts` before static asset fallback.
 
 ## Local development
 

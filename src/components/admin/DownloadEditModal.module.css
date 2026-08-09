@@ -1,0 +1,226 @@
+.modalBackdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(17, 8, 28, 0.35);
+	backdrop-filter: blur(6px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 100;
+	padding: 1.5rem;
+}
+.modalScrim {
+	position: absolute;
+	inset: 0;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+}
+.modalCard {
+	width: 100%;
+	max-width: 500px;
+	background: rgba(255, 255, 255, 0.98);
+	border-radius: 20px;
+	padding: 1.5rem;
+	box-shadow: 0 20px 50px rgba(107, 76, 154, 0.25);
+	position: relative;
+	z-index: 1;
+	max-height: 90vh;
+	overflow-y: auto;
+}
+.modalLg {
+	max-width: 600px;
+}
+.modalHeader {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 1rem;
+}
+.modalHeader h3 {
+	margin: 0;
+	font-family: 'Fredoka', sans-serif;
+	color: #6b4c9a;
+	font-size: 1.3rem;
+}
+.modalClose {
+	border: none;
+	background: rgba(107, 76, 154, 0.1);
+	color: #6b4c9a;
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	cursor: pointer;
+	font-size: 1.2rem;
+	transition: all 0.3s ease;
+}
+.modalClose:hover {
+	background: rgba(107, 76, 154, 0.2);
+}
+.modalFooter {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.75rem;
+	margin-top: 1.5rem;
+}
+.authError {
+	color: #dc3545;
+	font-size: 0.9rem;
+	margin: 0 0 1rem;
+}
+.modalFormGrid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1rem;
+}
+.formGroup {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+.fullWidth {
+	grid-column: 1 / -1;
+}
+.formGroup label {
+	font-weight: 600;
+	color: #6b4c9a;
+	font-size: 0.9rem;
+}
+.formGroup input,
+.formGroup select,
+.formGroup textarea {
+	box-sizing: border-box;
+	min-width: 0;
+	width: 100%;
+	padding: 0.75rem 1rem;
+	border: 2px solid #e6e0f0;
+	border-radius: 12px;
+	font-size: 1rem;
+	font-family: inherit;
+	transition: all 0.3s ease;
+}
+.formGroup input:focus,
+.formGroup select:focus,
+.formGroup textarea:focus {
+	outline: none;
+	border-color: #6b4c9a;
+	box-shadow: 0 0 0 3px rgba(107, 76, 154, 0.15);
+}
+.formGroup textarea {
+	min-height: 80px;
+	resize: vertical;
+}
+.fieldHint {
+	font-size: 0.8rem;
+	color: #a89bc4;
+	margin: 0;
+}
+.rustdeskConfig {
+	background: rgba(0, 150, 136, 0.06);
+	border: 1px solid rgba(0, 150, 136, 0.12);
+	border-radius: 12px;
+	padding: 1rem;
+}
+.checkboxLabel {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-weight: 600;
+	color: #2f7f77;
+	cursor: pointer;
+}
+.checkboxLabel input {
+	width: 16px;
+	height: 16px;
+}
+.rustdeskGrid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1rem;
+	margin-top: 1rem;
+}
+.btn {
+	padding: 0.6rem 1.2rem;
+	border: none;
+	border-radius: 12px;
+	font-family: inherit;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+.btnPrimary {
+	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	color: white;
+}
+.btnPrimary:hover:not(:disabled) {
+	transform: translateY(-2px);
+	box-shadow: 0 8px 20px rgba(102, 126, 234, 0.35);
+}
+.btnSecondary {
+	background: rgba(107, 76, 154, 0.1);
+	color: #6b4c9a;
+}
+.btn:disabled {
+	opacity: 0.7;
+	cursor: not-allowed;
+}
+.spinner {
+	width: 16px;
+	height: 16px;
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	border-top-color: white;
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
+	display: inline-block;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (max-width: 640px) {
+	.modalBackdrop {
+		align-items: flex-end;
+		padding: 0.5rem;
+	}
+	.modalCard {
+		box-sizing: border-box;
+		max-height: calc(100dvh - 1rem);
+		padding: 1rem;
+	}
+	.modalFormGrid,
+	.rustdeskGrid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.modalFooter {
+		flex-wrap: wrap;
+	}
+	.modalFooter .btn {
+		flex: 1;
+		justify-content: center;
+	}
+	.fieldHint {
+		overflow-wrap: anywhere;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.modalClose,
+	.btn {
+		transition: none;
+	}
+	.modalClose:hover,
+	.btnPrimary:hover:not(:disabled),
+	.btnSecondary:hover {
+		transform: none;
+		box-shadow: none;
+	}
+	.spinner {
+		animation: none;
+	}
+}

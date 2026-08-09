@@ -12,9 +12,13 @@ function collectTests(directory, suffix) {
 	return files.sort();
 }
 
-const tests = [...collectTests('src', '.test.ts'), ...collectTests('scripts', '.test.js')].sort();
+const tests = [
+	...collectTests('src', '.test.ts'),
+	...collectTests('worker', '.test.ts'),
+	...collectTests('scripts', '.test.js')
+].sort();
 if (tests.length === 0) {
-	console.error('No tests found under src/ or scripts/');
+	console.error('No tests found under src/, worker/, or scripts/');
 	process.exit(1);
 }
 

@@ -1,0 +1,30 @@
+.announcement-section {
+	width: 100%;
+	max-width: 720px;
+	margin-bottom: 2rem;
+}
+
+.section-header {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-bottom: 1rem;
+}
+
+.section-icon {
+	font-size: 1.25rem;
+}
+
+.section-title {
+	font-family: 'Fredoka', 'Nunito', sans-serif;
+	font-size: 1.25rem;
+	font-weight: 600;
+	color: #6b4c9a;
+	margin: 0;
+}
+
+.announcement-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}

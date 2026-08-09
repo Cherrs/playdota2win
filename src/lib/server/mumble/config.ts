@@ -1,4 +1,5 @@
 import type { IceServer, MumbleProxyConfig } from '$lib/types';
+import type { RuntimePlatform } from '$lib/runtime';
 
 const DEFAULT_STUN_SERVERS = ['stun:stun.l.google.com:19302'];
 const DEFAULT_PROXY_PORT = '8080';
@@ -73,7 +74,7 @@ function parseIceServerUrls(value: string | undefined): string[] {
 	return urls.length > 0 ? Array.from(new Set(urls)) : DEFAULT_STUN_SERVERS;
 }
 
-function createIceServers(platform: App.Platform | undefined): IceServer[] {
+function createIceServers(platform: RuntimePlatform | undefined): IceServer[] {
 	const urls = parseIceServerUrls(platform?.env?.MUMBLE_PROXY_STUN_SERVERS);
 	const username = platform?.env?.MUMBLE_PROXY_TURN_USERNAME?.trim();
 	const credential = platform?.env?.MUMBLE_PROXY_TURN_CREDENTIAL?.trim();
@@ -110,7 +111,7 @@ function deriveProxyUrl(requestUrl: URL | undefined, kind: 'ws' | 'health'): str
 }
 
 export async function getMumbleProxyConfig(
-	platform: App.Platform | undefined,
+	platform: RuntimePlatform | undefined,
 	requestUrl?: URL
 ): Promise<MumbleProxyConfig | null> {
 	const wsUrl = normalizeUrl(platform?.env?.MUMBLE_PROXY_WS_URL);
@@ -134,7 +135,7 @@ export async function getMumbleProxyConfig(
 }
 
 export function getMumbleProxyHealthUrl(
-	platform: App.Platform | undefined,
+	platform: RuntimePlatform | undefined,
 	requestUrl?: URL
 ): string | null {
 	const explicitUrl = normalizeUrl(platform?.env?.MUMBLE_PROXY_HEALTH_URL);

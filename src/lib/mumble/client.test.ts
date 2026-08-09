@@ -358,3 +358,82 @@ test('reconnect waits for the previous socket to close before opening a new sess
 		});
 	}
 });
+
+test('external-store subscribers receive immutable snapshots and can unsubscribe', () => {
+	const client = createMumbleClient({
+		config: {
+			wsUrl: 'ws://127.0.0.1:8080/ws',
+			iceServers: [],
+			healthUrl: null
+		},
+		nickname: 'StoreUser',
+		mode: 'interactive'
+	});
+	const initialSnapshot = client.getSnapshot();
+	let notifications = 0;
+	const observedSnapshots: boolean[] = [];
+	const unsubscribeState = client.state.subscribe((snapshot) => {
+		observedSnapshots.push(snapshot.muted);
+	});
+	const unsubscribe = client.subscribe(() => {
+		notifications += 1;
+	});
+
+	client.setMuted(true);
+
+	assert.equal(notifications, 1);
+	assert.notEqual(client.getSnapshot(), initialSnapshot);
+	assert.equal(client.getSnapshot().muted, true);
+	assert.deepEqual(observedSnapshots, [false, true]);
+
+	unsubscribe();
+	unsubscribeState();
+	client.setMuted(false);
+	assert.equal(notifications, 1);
+	client.destroy();
+});
+
+test('destroy stops a microphone stream that resolves after the client is gone', async () => {
+	const originalNavigator = globalThis.navigator;
+	const track = new FakeMediaStreamTrack();
+	const localStream = new FakeMediaStream([track]);
+	let resolveUserMedia!: (stream: MediaStream) => void;
+	const userMediaPromise = new Promise<MediaStream>((resolve) => {
+		resolveUserMedia = resolve;
+	});
+
+	Object.defineProperty(globalThis, 'navigator', {
+		configurable: true,
+		value: {
+			mediaDevices: {
+				getUserMedia: () => userMediaPromise
+			}
+		}
+	});
+
+	try {
+		const client = createMumbleClient({
+			config: {
+				wsUrl: 'ws://127.0.0.1:8080/ws',
+				iceServers: [],
+				healthUrl: null
+			},
+			nickname: 'LatePermissionUser',
+			mode: 'interactive'
+		});
+
+		const voiceRequest = client.ensureVoice();
+		client.destroy();
+		resolveUserMedia(localStream as unknown as MediaStream);
+		await voiceRequest;
+
+		assert.equal(track.stopCalls, 1);
+		assert.equal(client.getSnapshot().voiceAvailable, false);
+		assert.equal(client.getSnapshot().voiceConnected, false);
+	} finally {
+		Object.defineProperty(globalThis, 'navigator', {
+			configurable: true,
+			value: originalNavigator
+		});
+	}
+});

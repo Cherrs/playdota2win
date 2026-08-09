@@ -1,0 +1,64 @@
+import { json } from './http.ts';
+
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+const scriptSources = [
+	"'self'",
+	...(import.meta.env?.DEV ? ["'unsafe-inline'"] : []),
+	'https://challenges.cloudflare.com'
+].join(' ');
+
+const CONTENT_SECURITY_POLICY = [
+	"default-src 'self'",
+	"base-uri 'self'",
+	"object-src 'none'",
+	"frame-ancestors 'none'",
+	"form-action 'self'",
+	`script-src ${scriptSources}`,
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+	"font-src 'self' data: https://fonts.gstatic.com",
+	"img-src 'self' data: blob:",
+	"media-src 'self' blob:",
+	"worker-src 'self' blob:",
+	"connect-src 'self' https: https://challenges.cloudflare.com wss://voice.playdota2.win",
+	'frame-src https://challenges.cloudflare.com'
+].join('; ');
+
+export function isCrossOriginAdminMutation(request: Request, url: URL): boolean {
+	if (!url.pathname.startsWith('/api/admin') || !UNSAFE_METHODS.has(request.method)) return false;
+	if (request.headers.get('Sec-Fetch-Site') === 'cross-site') return true;
+	const origin = request.headers.get('Origin');
+	if (!origin) return false;
+	try {
+		return new URL(origin).origin !== url.origin;
+	} catch {
+		return true;
+	}
+}
+
+export function rejectCrossOriginAdminMutation(request: Request, url: URL): Response | null {
+	return isCrossOriginAdminMutation(request, url)
+		? json({ success: false, error: '拒绝跨站管理请求' }, { status: 403 })
+		: null;
+}
+
+export function addSecurityHeaders(response: Response, url: URL): Response {
+	const headers = new Headers(response.headers);
+	headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+	headers.set('X-Content-Type-Options', 'nosniff');
+	headers.set('Referrer-Policy', 'no-referrer');
+	headers.set('X-Frame-Options', 'DENY');
+	headers.set('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
+	headers.set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+	if (url.protocol === 'https:') {
+		headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+	}
+	if (url.pathname === '/admin' || url.pathname.startsWith('/api/admin')) {
+		headers.set('Cache-Control', 'no-store');
+	}
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers
+	});
+}
