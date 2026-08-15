@@ -6,6 +6,7 @@ import { getDownloadBackupStateKey, type DownloadBackupLogger } from './download
 import { DOWNLOAD_LIST_R2_KEY } from './download-list-store.ts';
 import {
 	findManagedSoftwareItem,
+	parseOfficialLatestReleaseUrl,
 	parseOfficialSoftwareRelease,
 	updateManagedSoftware
 } from './software-update.ts';
@@ -145,6 +146,30 @@ test('parses only the expected stable official Windows asset', () => {
 	);
 });
 
+test('builds the expected official asset from a GitHub latest-release redirect', () => {
+	assert.deepEqual(
+		parseOfficialLatestReleaseUrl(
+			'mumble',
+			'https://github.com/mumble-voip/mumble/releases/tag/v1.5.915'
+		),
+		{
+			product: 'mumble',
+			version: '1.5.915',
+			filename: 'mumble_client-1.5.915.x64.exe',
+			downloadUrl:
+				'https://github.com/mumble-voip/mumble/releases/download/v1.5.915/mumble_client-1.5.915.x64.exe'
+		}
+	);
+	assert.throws(
+		() =>
+			parseOfficialLatestReleaseUrl(
+				'mumble',
+				'https://attacker.example/mumble-voip/mumble/releases/tag/v1.5.915'
+			),
+		/unexpected/iu
+	);
+});
+
 test('matches only the official RustDesk API item and excludes the monkey installer', () => {
 	const official = downloadItem({
 		id: 'rustdesk',
@@ -199,10 +224,19 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 	const bucket = new MemoryR2();
 	await bucket.seedList(list);
 	const assetDownloads: string[] = [];
+	let mumbleFallbackChecks = 0;
 	const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
 		const url = String(input);
-		if (url.endsWith('/mumble-voip/mumble/releases/latest')) {
-			return Response.json(releasePayload('mumble', '1.5.915', mumbleSize));
+		if (url.startsWith('https://api.github.com/') && url.endsWith('/mumble/releases/latest')) {
+			return new Response('rate limited', { status: 403 });
+		}
+		if (url === 'https://github.com/mumble-voip/mumble/releases/latest') {
+			mumbleFallbackChecks += 1;
+			const response = new Response('latest release');
+			Object.defineProperty(response, 'url', {
+				value: 'https://github.com/mumble-voip/mumble/releases/tag/v1.5.915'
+			});
+			return response;
 		}
 		if (url.endsWith('/rustdesk/rustdesk/releases/latest')) {
 			return Response.json(releasePayload('rustdesk', '1.4.9', rustDeskSize));
@@ -233,6 +267,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 		'origin'
 	);
 	assert.equal(assetDownloads.length, 2);
+	assert.equal(mumbleFallbackChecks, 1);
 
 	const stored = bucket.readJson<DownloadList>(DOWNLOAD_LIST_R2_KEY);
 	assert.deepEqual(
@@ -277,4 +312,5 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 	assert.equal(second.current, 2);
 	assert.equal(second.failed, 0);
 	assert.deepEqual(assetDownloads, []);
+	assert.equal(mumbleFallbackChecks, 2);
 });

@@ -23,6 +23,7 @@ interface ManagedSoftwareDefinition {
 	repositoryPath: string;
 	latestReleaseUrl: string;
 	assetPattern: RegExp;
+	assetFilename(version: string): string;
 	matchesItem(item: DownloadItem): boolean;
 }
 
@@ -44,7 +45,7 @@ export interface OfficialSoftwareRelease {
 	version: string;
 	filename: string;
 	downloadUrl: string;
-	size: number;
+	size?: number;
 }
 
 export interface SoftwareUpdateItemResult {
@@ -83,6 +84,7 @@ const MANAGED_SOFTWARE: Record<ManagedSoftware, ManagedSoftwareDefinition> = {
 		repositoryPath: 'mumble-voip/mumble',
 		latestReleaseUrl: 'https://api.github.com/repos/mumble-voip/mumble/releases/latest',
 		assetPattern: /^mumble_client-(\d+(?:\.\d+)+)\.x64\.exe$/iu,
+		assetFilename: (version) => `mumble_client-${version}.x64.exe`,
 		matchesItem(item) {
 			if (item.storageType !== 'link' || item.platform !== 'windows') return false;
 			const filenames = [getOriginDownloadFilename(item), item.filename || ''];
@@ -97,6 +99,7 @@ const MANAGED_SOFTWARE: Record<ManagedSoftware, ManagedSoftwareDefinition> = {
 		repositoryPath: 'rustdesk/rustdesk',
 		latestReleaseUrl: 'https://api.github.com/repos/rustdesk/rustdesk/releases/latest',
 		assetPattern: /^rustdesk-(\d+(?:\.\d+)+)-x86_64\.exe$/iu,
+		assetFilename: (version) => `rustdesk-${version}-x86_64.exe`,
 		matchesItem(item) {
 			return (
 				item.storageType === 'link' &&
@@ -226,9 +229,81 @@ async function fetchOfficialSoftwareRelease(
 	});
 	if (!response.ok) {
 		await response.body?.cancel();
+		if (response.status === 403 || response.status === 429) {
+			return fetchOfficialSoftwareReleaseFromRedirect(product, fetchImpl);
+		}
 		throw new Error(`${definition.label} release check returned HTTP ${response.status}`);
 	}
 	return parseOfficialSoftwareRelease(product, await response.json());
+}
+
+export function parseOfficialLatestReleaseUrl(
+	product: ManagedSoftware,
+	value: string
+): OfficialSoftwareRelease {
+	const definition = MANAGED_SOFTWARE[product];
+	let parsed: URL;
+	try {
+		parsed = new URL(value);
+	} catch {
+		throw new Error(`${definition.label} latest release redirect is invalid`);
+	}
+	const tagPrefix = `/${definition.repositoryPath}/releases/tag/`;
+	if (
+		parsed.protocol !== 'https:' ||
+		parsed.hostname !== 'github.com' ||
+		!parsed.pathname.startsWith(tagPrefix)
+	) {
+		throw new Error(`${definition.label} latest release redirect is unexpected`);
+	}
+	const encodedTag = parsed.pathname.slice(tagPrefix.length);
+	let tag: string;
+	try {
+		tag = decodeURIComponent(encodedTag);
+	} catch {
+		throw new Error(`${definition.label} latest release tag is invalid`);
+	}
+	if (!tag || tag.includes('/')) {
+		throw new Error(`${definition.label} latest release tag is invalid`);
+	}
+	const version = extractComparableVersion(tag);
+	if (!version) throw new Error(`${definition.label} latest release tag has no version`);
+	const filename = definition.assetFilename(version);
+	if (!definition.assetPattern.test(filename)) {
+		throw new Error(`${definition.label} fallback asset filename is invalid`);
+	}
+	return {
+		product,
+		version,
+		filename,
+		downloadUrl: `https://github.com/${definition.repositoryPath}/releases/download/${encodeURIComponent(tag)}/${filename}`
+	};
+}
+
+async function fetchOfficialSoftwareReleaseFromRedirect(
+	product: ManagedSoftware,
+	fetchImpl: FetchLike
+): Promise<OfficialSoftwareRelease> {
+	const definition = MANAGED_SOFTWARE[product];
+	const response = await fetchImpl(
+		`https://github.com/${definition.repositoryPath}/releases/latest`,
+		{
+			method: 'GET',
+			redirect: 'follow',
+			signal: AbortSignal.timeout(RELEASE_REQUEST_TIMEOUT_MS),
+			headers: {
+				Accept: 'text/html',
+				'User-Agent': 'playdota2win-software-updater'
+			}
+		}
+	);
+	if (!response.ok) {
+		await response.body?.cancel();
+		throw new Error(`${definition.label} latest release fallback returned HTTP ${response.status}`);
+	}
+	const release = parseOfficialLatestReleaseUrl(product, response.url);
+	await response.body?.cancel();
+	return release;
 }
 
 function formatDownloadSize(bytes: number): string {
@@ -285,7 +360,7 @@ function selectedMetadata(
 		filename,
 		version,
 		size:
-			compareNumericVersions(version, release.version) === 0
+			compareNumericVersions(version, release.version) === 0 && release.size
 				? formatDownloadSize(release.size)
 				: item.size,
 		selectedSource: 'origin'
@@ -308,7 +383,7 @@ export async function updateManagedSoftware(
 		let r2Updated = false;
 		try {
 			item = findManagedSoftwareItem(snapshot.list.items, product);
-			const release = await fetchOfficialSoftwareRelease(product, fetchImpl);
+			let release = await fetchOfficialSoftwareRelease(product, fetchImpl);
 			const originFilename = getOriginDownloadFilename(item);
 			const originVersion = extractComparableVersion(originFilename);
 			if (!originVersion) {
@@ -332,7 +407,7 @@ export async function updateManagedSoftware(
 					url: release.downloadUrl,
 					filename: release.filename,
 					version: release.version,
-					size: formatDownloadSize(release.size)
+					size: release.size ? formatDownloadSize(release.size) : item.size
 				};
 				const queued = await queueDownloadBackup(backupStore, releaseItem, {
 					logger: options.backupLogger,
@@ -357,6 +432,7 @@ export async function updateManagedSoftware(
 					throw new Error(synced.error || `${definition.label} R2 update did not complete`);
 				}
 				backupState = synced;
+				if (synced.size) release = { ...release, size: synced.size };
 				r2Updated = true;
 			}
 
