@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 
 import type { ApiResponse, Category, DownloadItem, Platform, StorageType } from '$lib/types';
+import { needsR2VersionSync } from '$lib/utils/download-sync';
 
 import styles from './DownloadList.module.css';
 import { classNames } from './classNames';
@@ -108,6 +109,7 @@ export default function DownloadList({
 		() => downloads.filter((item) => item.storageType === 'link'),
 		[downloads]
 	);
+	const r2SyncDownloads = useMemo(() => linkDownloads.filter(needsR2VersionSync), [linkDownloads]);
 	const selectedItemIds = useMemo(
 		() => downloads.filter((download) => selectedIds.has(download.id)).map(({ id }) => id),
 		[downloads, selectedIds]
@@ -125,7 +127,7 @@ export default function DownloadList({
 
 	async function handleSyncLinks() {
 		if (
-			linkDownloads.length === 0 ||
+			r2SyncDownloads.length === 0 ||
 			syncingLinks ||
 			syncControllerRef.current ||
 			updateControllerRef.current ||
@@ -145,8 +147,8 @@ export default function DownloadList({
 			let failed = 0;
 			const failures: string[] = [];
 			async function worker() {
-				while (nextIndex < linkDownloads.length) {
-					const item = linkDownloads[nextIndex++];
+				while (nextIndex < r2SyncDownloads.length) {
+					const item = r2SyncDownloads[nextIndex++];
 					try {
 						const response = await fetch('/api/admin/downloads/sync', {
 							method: 'POST',
@@ -168,7 +170,9 @@ export default function DownloadList({
 					}
 				}
 			}
-			await Promise.all(Array.from({ length: Math.min(3, linkDownloads.length) }, () => worker()));
+			await Promise.all(
+				Array.from({ length: Math.min(3, r2SyncDownloads.length) }, () => worker())
+			);
 			if (controller.signal.aborted) return;
 			await onReload({ silent: true });
 			if (controller.signal.aborted) return;
@@ -415,10 +419,12 @@ export default function DownloadList({
 							type="button"
 							onClick={() => void handleSyncLinks()}
 							disabled={
-								checkingUpdates || syncingLinks || bulkUpdating || linkDownloads.length === 0
+								checkingUpdates || syncingLinks || bulkUpdating || r2SyncDownloads.length === 0
 							}
 							title={
-								linkDownloads.length === 0 ? '没有可同步的外部链接' : '将所有外部链接备份到 R2'
+								r2SyncDownloads.length === 0
+									? '当前版本与 R2 版本一致，无需同步'
+									: `同步 ${r2SyncDownloads.length} 个版本不同的外部链接到 R2`
 							}
 						>
 							{syncingLinks ? (
@@ -427,7 +433,7 @@ export default function DownloadList({
 									正在同步...
 								</>
 							) : (
-								`☁️ 同步到 R2 (${linkDownloads.length})`
+								`☁️ 同步到 R2 (${r2SyncDownloads.length})`
 							)}
 						</button>
 						<button

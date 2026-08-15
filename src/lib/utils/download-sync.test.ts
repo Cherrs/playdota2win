@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { DownloadItem, R2BackupState } from '../types.ts';
-import { getBackupSyncProgress, type BackupSyncJob } from './download-sync.ts';
+import { getBackupSyncProgress, needsR2VersionSync, type BackupSyncJob } from './download-sync.ts';
 
 function itemWithState(state: R2BackupState): DownloadItem {
 	return {
@@ -88,4 +88,43 @@ test('waits through stale KV reads but detects a newer superseding operation', (
 	assert.equal(superseded.pending.length, 0);
 	assert.equal(superseded.failed.length, 1);
 	assert.match(superseded.failed[0].error, /新的任务替代/);
+});
+
+test('enables manual sync only for missing, failed or different R2 versions', () => {
+	const base = itemWithState({
+		status: 'ready',
+		sourceUrl: 'https://example.com/client-1.5.915.exe',
+		filename: 'client-1.5.915.exe',
+		version: '1.5.915',
+		operationId: 'ready',
+		updatedAt: 1
+	});
+	base.filename = 'client-1.5.915.exe';
+	base.version = '1.5.915';
+
+	assert.equal(needsR2VersionSync(base), false);
+	assert.equal(
+		needsR2VersionSync({
+			...base,
+			version: '1.5.916',
+			filename: 'client-1.5.916.exe'
+		}),
+		true
+	);
+	assert.equal(needsR2VersionSync({ ...base, r2Backup: undefined }), true);
+	assert.equal(
+		needsR2VersionSync({
+			...base,
+			r2Backup: { ...base.r2Backup!, status: 'failed', error: 'failed' }
+		}),
+		true
+	);
+	assert.equal(
+		needsR2VersionSync({
+			...base,
+			r2Backup: { ...base.r2Backup!, status: 'syncing' }
+		}),
+		false
+	);
+	assert.equal(needsR2VersionSync({ ...base, storageType: 'r2' }), false);
 });

@@ -1,4 +1,5 @@
 import type { DownloadItem } from '../types.ts';
+import { compareNumericVersions, extractComparableVersion } from './download-version.ts';
 
 export interface BackupSyncJob {
 	itemId: string;
@@ -15,6 +16,37 @@ export interface BackupSyncProgress {
 	ready: BackupSyncJob[];
 	pending: BackupSyncJob[];
 	failed: BackupSyncFailure[];
+}
+
+function getCurrentItemVersion(item: DownloadItem): string | undefined {
+	return (
+		extractComparableVersion(item.filename || '') ||
+		extractComparableVersion(item.version) ||
+		extractComparableVersion(item.url)
+	);
+}
+
+function getBackupVersion(item: DownloadItem): string | undefined {
+	const state = item.r2Backup;
+	return (
+		state?.version ||
+		extractComparableVersion(state?.filename || '') ||
+		extractComparableVersion(state?.sourceUrl || '')
+	);
+}
+
+/** 仅在能够确认 R2 缺失、失败或版本不一致时允许手动同步。 */
+export function needsR2VersionSync(item: DownloadItem): boolean {
+	if (item.storageType !== 'link') return false;
+	const state = item.r2Backup;
+	if (!state) return true;
+	if (state.status === 'pending' || state.status === 'syncing') return false;
+	if (state.status === 'failed') return true;
+
+	const currentVersion = getCurrentItemVersion(item);
+	const backupVersion = getBackupVersion(item);
+	if (!currentVersion || !backupVersion) return false;
+	return compareNumericVersions(currentVersion, backupVersion) !== 0;
 }
 
 /** 按 operationId 判断本次同步结果，避免把 KV 中旧任务的 ready 状态误报为成功。 */
