@@ -9,7 +9,8 @@ const scriptSources = [
 	"'self'",
 	PUBLIC_HOME_PRELOAD_HASH,
 	...(import.meta.env?.DEV ? ["'unsafe-inline'"] : []),
-	'https://challenges.cloudflare.com'
+	'https://challenges.cloudflare.com',
+	'https://static.cloudflareinsights.com'
 ].join(' ');
 
 const CONTENT_SECURITY_POLICY = [

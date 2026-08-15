@@ -69,7 +69,7 @@ test('uses immutable caching only for fingerprinted assets', () => {
 	assert.equal(admin.headers.get('Cache-Control'), 'no-store');
 });
 
-test('production CSP authorizes the exact inline home preload', () => {
+test('production CSP authorizes the home preload and Cloudflare Web Analytics', () => {
 	const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 	const script = html.match(/<script>([\s\S]*?)<\/script>/u)?.[1];
 	assert.ok(script);
@@ -79,5 +79,7 @@ test('production CSP authorizes the exact inline home preload', () => {
 		new URL('https://playdota2.win/')
 	);
 
-	assert.ok((response.headers.get('Content-Security-Policy') ?? '').includes(`'${hash}'`));
+	const policy = response.headers.get('Content-Security-Policy') ?? '';
+	assert.ok(policy.includes(`'${hash}'`));
+	assert.match(policy, /script-src[^;]*https:\/\/static\.cloudflareinsights\.com/u);
 });
