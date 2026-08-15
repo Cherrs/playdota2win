@@ -18,6 +18,7 @@ import * as getTime from './routes/public/get-time';
 import * as mumbleConfig from './routes/public/mumble-config';
 import * as rustDesk from './routes/public/rustdesk';
 import { json } from './http';
+import { prerenderPublicShell, shouldPrerenderPublicShell } from './public-shell';
 import { exact, runApiHandler, splat, type ApiRoute } from './router';
 import { addSecurityHeaders, rejectCrossOriginAdminMutation } from './security';
 
@@ -53,10 +54,13 @@ async function handleRequest(
 	if (crossOriginRejection) return addSecurityHeaders(crossOriginRejection, url);
 
 	try {
-		const response =
-			url.pathname === '/api' || url.pathname.startsWith('/api/')
-				? await runApiHandler(request, env, executionContext, url, API_ROUTES)
-				: await env.ASSETS.fetch(request);
+		const isApiRequest = url.pathname === '/api' || url.pathname.startsWith('/api/');
+		let response = isApiRequest
+			? await runApiHandler(request, env, executionContext, url, API_ROUTES)
+			: await env.ASSETS.fetch(request);
+		if (!isApiRequest && shouldPrerenderPublicShell(request, url, response)) {
+			response = prerenderPublicShell(response);
+		}
 		return addSecurityHeaders(response, url);
 	} catch (error) {
 		console.error({

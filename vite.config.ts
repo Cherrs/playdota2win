@@ -5,6 +5,7 @@ import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
 	plugins: [react(), cloudflare()],
+	publicDir: 'static',
 	resolve: {
 		alias: {
 			$lib: fileURLToPath(new URL('./src/lib', import.meta.url)),

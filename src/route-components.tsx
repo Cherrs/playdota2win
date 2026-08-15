@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Outlet, useLocation, useRouteError } from 'react-router';
+import DownloadPage from './pages/DownloadPage';
 
-const DownloadPage = lazy(() => import('./pages/DownloadPage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const MumbleWidget = lazy(() => import('./components/mumble/MumbleWidget'));
 

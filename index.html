@@ -12,6 +12,26 @@
 			href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap"
 			rel="stylesheet"
 		/>
+		<script>
+			(() => {
+				if (!new Set(['/', '/download', '/download/']).has(window.location.pathname)) return;
+				const load = (url, options) => {
+					const promise = fetch(url, options).then(async (response) => ({
+						ok: response.ok,
+						status: response.status,
+						data: await response.json()
+					}));
+					void promise.catch(() => undefined);
+					return promise;
+				};
+				window.__PLAYDOTA2WIN_PUBLIC_HOME_PRELOAD__ = {
+					createdAt: Date.now(),
+					categories: load('/api/categories'),
+					downloads: load('/api/downloads', { cache: 'no-store' }),
+					announcements: load('/api/announcements')
+				};
+			})();
+		</script>
 		<title>PlayDota2Win</title>
 	</head>
 	<body>

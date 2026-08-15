@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react';
-import type {
-	Announcement,
-	AnnouncementList as AnnouncementListData,
-	ApiResponse
-} from '$lib/types';
+import { publicHomeDataLoader } from '$lib/public-home-data';
+import type { Announcement } from '$lib/types';
 import AnnouncementCard from './AnnouncementCard';
 import styles from './AnnouncementList.module.css';
 
@@ -15,10 +12,13 @@ export default function AnnouncementList() {
 		const controller = new AbortController();
 		void (async () => {
 			try {
-				const response = await fetch('/api/announcements', { signal: controller.signal });
-				if (!response.ok) throw new Error(`HTTP ${response.status}`);
-				const data = (await response.json()) as ApiResponse<AnnouncementListData>;
-				if (data.success && data.data) setAnnouncements(data.data.items);
+				const result = await publicHomeDataLoader.loadAnnouncements({
+					signal: controller.signal
+				});
+				if (!result.ok) throw new Error(`HTTP ${result.status}`);
+				if (result.data.success && result.data.data) {
+					setAnnouncements(result.data.data.items);
+				}
 			} catch (caught) {
 				if (caught instanceof DOMException && caught.name === 'AbortError') return;
 				console.error('Failed to load announcements:', caught);

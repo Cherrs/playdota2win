@@ -1,9 +1,13 @@
 import { json } from './http.ts';
 
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const HASHED_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const HTML_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
+const PUBLIC_HOME_PRELOAD_HASH = "'sha256-LkuUBDGRH2PJdzD0/6922PtpuJX2fkkVeZFHilA1X/Y='";
 
 const scriptSources = [
 	"'self'",
+	PUBLIC_HOME_PRELOAD_HASH,
 	...(import.meta.env?.DEV ? ["'unsafe-inline'"] : []),
 	'https://challenges.cloudflare.com'
 ].join(' ');
@@ -55,6 +59,10 @@ export function addSecurityHeaders(response: Response, url: URL): Response {
 	}
 	if (url.pathname === '/admin' || url.pathname.startsWith('/api/admin')) {
 		headers.set('Cache-Control', 'no-store');
+	} else if (url.pathname.startsWith('/assets/')) {
+		headers.set('Cache-Control', HASHED_ASSET_CACHE_CONTROL);
+	} else if ((headers.get('Content-Type') ?? '').startsWith('text/html')) {
+		headers.set('Cache-Control', HTML_CACHE_CONTROL);
 	}
 	return new Response(response.body, {
 		status: response.status,

@@ -7,13 +7,8 @@ import {
 	useRef,
 	useState
 } from 'react';
-import type {
-	ApiResponse,
-	Category,
-	CategoryList,
-	PublicDownloadItem,
-	PublicDownloadList
-} from '$lib/types';
+import type { ApiResponse, Category, PublicDownloadItem } from '$lib/types';
+import { publicHomeDataLoader } from '$lib/public-home-data';
 import { preloadTurnstileScript } from '$lib/utils/turnstile-client';
 import AnnouncementList from '../components/public/AnnouncementList';
 import BackgroundDecorations from '../components/public/BackgroundDecorations';
@@ -84,9 +79,10 @@ export default function DownloadPage() {
 		const controller = new AbortController();
 		categoriesRequestRef.current = controller;
 		try {
-			const response = await fetch('/api/categories', { signal: controller.signal });
-			const data = (await response.json()) as ApiResponse<CategoryList>;
-			if (data.success && data.data) setCategories(data.data.items);
+			const result = await publicHomeDataLoader.loadCategories({ signal: controller.signal });
+			if (result.ok && result.data.success && result.data.data) {
+				setCategories(result.data.data.items);
+			}
 		} catch (caught) {
 			if (caught instanceof DOMException && caught.name === 'AbortError') return;
 			console.error('Failed to load categories:', caught);
@@ -95,23 +91,22 @@ export default function DownloadPage() {
 		}
 	}, []);
 
-	const loadDownloads = useCallback(async () => {
+	const loadDownloads = useCallback(async (options: { force?: boolean } = {}) => {
 		downloadsRequestRef.current?.abort();
 		const controller = new AbortController();
 		downloadsRequestRef.current = controller;
 		setLoading(true);
 		setLoadError('');
 		try {
-			const response = await fetch('/api/downloads', {
-				cache: 'no-store',
+			const result = await publicHomeDataLoader.loadDownloads({
+				force: options.force,
 				signal: controller.signal
 			});
-			const data = (await response.json()) as ApiResponse<PublicDownloadList>;
-			if (response.ok && data.success && data.data) {
-				setDownloads(data.data.items);
-				setDownloadCount(data.data.downloadCount);
+			if (result.ok && result.data.success && result.data.data) {
+				setDownloads(result.data.data.items);
+				setDownloadCount(result.data.data.downloadCount);
 			} else {
-				throw new Error(data.error || `加载失败（HTTP ${response.status}）`);
+				throw new Error(result.data.error || `加载失败（HTTP ${result.status}）`);
 			}
 		} catch (caught) {
 			if (caught instanceof DOMException && caught.name === 'AbortError') return;
@@ -385,7 +380,7 @@ export default function DownloadPage() {
 									<button
 										className={styles['retry-btn']}
 										type="button"
-										onClick={() => void loadDownloads()}
+										onClick={() => void loadDownloads({ force: true })}
 									>
 										重新加载
 									</button>
