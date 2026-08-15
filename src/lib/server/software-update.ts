@@ -7,6 +7,7 @@ import {
 	getDownloadBackupState,
 	getOriginDownloadFilename,
 	getReadyDownloadBackupObjectKey,
+	isExternalDownloadAvailable,
 	queueDownloadBackup,
 	shouldPreferDownloadBackup,
 	syncDownloadBackup,
@@ -58,6 +59,7 @@ export interface SoftwareUpdateItemResult {
 	filename?: string;
 	size?: string;
 	selectedSource?: 'origin' | 'r2';
+	originUrlUpdated?: boolean;
 	r2Updated: boolean;
 	error?: string;
 }
@@ -113,6 +115,7 @@ const MANAGED_SOFTWARE: Record<ManagedSoftware, ManagedSoftwareDefinition> = {
 const MANAGED_SOFTWARE_ORDER: ManagedSoftware[] = ['mumble', 'rustdesk'];
 const RELEASE_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESULT_ERROR_LENGTH = 300;
+const PRIMARY_DOWNLOAD_HOSTNAME = 'd.playdota2.win';
 
 function resultError(error: unknown): string {
 	return (error instanceof Error ? error.message : 'Unknown update error')
@@ -311,6 +314,23 @@ function formatDownloadSize(bytes: number): string {
 	return `${mebibytes.toFixed(1)}MB`;
 }
 
+export function buildVersionedPrimaryDownloadUrl(
+	item: DownloadItem,
+	release: OfficialSoftwareRelease
+): string | undefined {
+	let parsed: URL;
+	try {
+		parsed = new URL(item.url);
+	} catch {
+		return undefined;
+	}
+	if (parsed.hostname.toLowerCase() !== PRIMARY_DOWNLOAD_HOSTNAME) return undefined;
+	const separator = parsed.pathname.lastIndexOf('/');
+	parsed.pathname = `${parsed.pathname.slice(0, separator + 1)}${encodeURIComponent(release.filename)}`;
+	parsed.hash = '';
+	return parsed.toString();
+}
+
 async function getExistingReadyBackup(
 	item: DownloadItem,
 	state: R2BackupState | undefined,
@@ -384,14 +404,28 @@ export async function updateManagedSoftware(
 		try {
 			item = findManagedSoftwareItem(snapshot.list.items, product);
 			let release = await fetchOfficialSoftwareRelease(product, fetchImpl);
-			const originFilename = getOriginDownloadFilename(item);
+			const configuredOriginVersion = extractComparableVersion(getOriginDownloadFilename(item));
+			if (!configuredOriginVersion) {
+				throw new Error(`${definition.label} original link filename has no comparable version`);
+			}
+			const primaryCandidateUrl =
+				compareNumericVersions(release.version, configuredOriginVersion) > 0
+					? buildVersionedPrimaryDownloadUrl(item, release)
+					: undefined;
+			const originUrlUpdated = Boolean(
+				primaryCandidateUrl &&
+				primaryCandidateUrl !== item.url &&
+				(await isExternalDownloadAvailable(primaryCandidateUrl, { fetchImpl }))
+			);
+			const effectiveItem = originUrlUpdated ? { ...item, url: primaryCandidateUrl! } : item;
+			const originFilename = getOriginDownloadFilename(effectiveItem);
 			const originVersion = extractComparableVersion(originFilename);
 			if (!originVersion) {
-				throw new Error(`${definition.label} original link filename has no comparable version`);
+				throw new Error(`${definition.label} selected origin filename has no comparable version`);
 			}
 
 			let backupState = await getExistingReadyBackup(
-				item,
+				effectiveItem,
 				await getDownloadBackupState(backupStore, item.id),
 				options.r2
 			);
@@ -403,7 +437,7 @@ export async function updateManagedSoftware(
 
 			if (releaseNotOlderThanOrigin && releaseNewerThanBackup) {
 				const releaseItem: DownloadItem = {
-					...item,
+					...effectiveItem,
 					url: release.downloadUrl,
 					filename: release.filename,
 					version: release.version,
@@ -436,14 +470,14 @@ export async function updateManagedSoftware(
 				r2Updated = true;
 			}
 
-			const selected = selectedMetadata(item, release, backupState);
+			const selected = selectedMetadata(effectiveItem, release, backupState);
 			const metadataChanged =
-				item.filename !== selected.filename ||
-				item.version !== selected.version ||
-				item.size !== selected.size;
-			if (metadataChanged) {
+				effectiveItem.filename !== selected.filename ||
+				effectiveItem.version !== selected.version ||
+				effectiveItem.size !== selected.size;
+			if (originUrlUpdated || metadataChanged) {
 				updatedItems.set(item.id, {
-					...item,
+					...effectiveItem,
 					filename: selected.filename,
 					version: selected.version,
 					size: selected.size,
@@ -456,11 +490,12 @@ export async function updateManagedSoftware(
 				label: definition.label,
 				itemId: item.id,
 				title: item.title,
-				status: r2Updated || metadataChanged ? 'updated' : 'current',
+				status: r2Updated || originUrlUpdated || metadataChanged ? 'updated' : 'current',
 				version: selected.version,
 				filename: selected.filename,
 				size: selected.size,
 				selectedSource: selected.selectedSource,
+				originUrlUpdated,
 				r2Updated
 			});
 		} catch (error) {

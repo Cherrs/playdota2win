@@ -5,6 +5,7 @@ import type { DownloadItem, DownloadList } from '../types.ts';
 import { getDownloadBackupStateKey, type DownloadBackupLogger } from './download-backup.ts';
 import { DOWNLOAD_LIST_R2_KEY } from './download-list-store.ts';
 import {
+	buildVersionedPrimaryDownloadUrl,
 	findManagedSoftwareItem,
 	parseOfficialLatestReleaseUrl,
 	parseOfficialSoftwareRelease,
@@ -170,6 +171,29 @@ test('builds the expected official asset from a GitHub latest-release redirect',
 	);
 });
 
+test('builds a same-directory versioned URL only for the primary download host', () => {
+	const release = parseOfficialLatestReleaseUrl(
+		'mumble',
+		'https://github.com/mumble-voip/mumble/releases/tag/v1.5.915'
+	);
+	assert.equal(
+		buildVersionedPrimaryDownloadUrl(
+			downloadItem({
+				url: 'https://d.playdota2.win:8081/tools/mumble_client-1.5.901.x64.exe'
+			}),
+			release
+		),
+		'https://d.playdota2.win:8081/tools/mumble_client-1.5.915.x64.exe'
+	);
+	assert.equal(
+		buildVersionedPrimaryDownloadUrl(
+			downloadItem({ url: 'https://downloads.example.com/mumble_client-1.5.901.x64.exe' }),
+			release
+		),
+		undefined
+	);
+});
+
 test('matches only the official RustDesk API item and excludes the monkey installer', () => {
 	const official = downloadItem({
 		id: 'rustdesk',
@@ -197,7 +221,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 		filename: 'mumble_client-1.5.901.x64.exe',
 		version: '1.5.901',
 		size: '47.0MB',
-		url: 'https://downloads.example.com/mumble_client-1.5.901.x64.exe'
+		url: 'https://d.playdota2.win:8081/mumble_client-1.5.901.x64.exe'
 	});
 	const rustdesk = downloadItem({
 		id: 'rustdesk',
@@ -205,7 +229,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 		filename: 'rustdesk-1.4.9-x86_64.exe',
 		version: '1.4.8',
 		size: '20.0MB',
-		url: 'https://downloads.example.com/rustdesk-1.4.9-x86_64.exe',
+		url: 'https://d.playdota2.win:8081/rustdesk-1.4.9-x86_64.exe',
 		rustdeskConfig: { enabled: true, idServer: 'id.example.com', key: 'key' }
 	});
 	const monkey = downloadItem({
@@ -225,7 +249,8 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 	await bucket.seedList(list);
 	const assetDownloads: string[] = [];
 	let mumbleFallbackChecks = 0;
-	const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
+	let primaryOriginChecks = 0;
+	const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		const url = String(input);
 		if (url.startsWith('https://api.github.com/') && url.endsWith('/mumble/releases/latest')) {
 			return new Response('rate limited', { status: 403 });
@@ -240,6 +265,13 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 		}
 		if (url.endsWith('/rustdesk/rustdesk/releases/latest')) {
 			return Response.json(releasePayload('rustdesk', '1.4.9', rustDeskSize));
+		}
+		if (
+			url === 'https://d.playdota2.win:8081/mumble_client-1.5.915.x64.exe' &&
+			init?.method === 'HEAD'
+		) {
+			primaryOriginChecks += 1;
+			return new Response(null, { status: 200 });
 		}
 		assetDownloads.push(url);
 		const size = url.includes('mumble_client') ? mumbleSize : rustDeskSize;
@@ -261,19 +293,25 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 	assert.equal(first.updated, 2);
 	assert.equal(first.current, 0);
 	assert.equal(first.failed, 0);
-	assert.equal(first.results.find((result) => result.product === 'mumble')?.selectedSource, 'r2');
+	assert.equal(
+		first.results.find((result) => result.product === 'mumble')?.selectedSource,
+		'origin'
+	);
+	assert.equal(first.results.find((result) => result.product === 'mumble')?.originUrlUpdated, true);
 	assert.equal(
 		first.results.find((result) => result.product === 'rustdesk')?.selectedSource,
 		'origin'
 	);
 	assert.equal(assetDownloads.length, 2);
 	assert.equal(mumbleFallbackChecks, 1);
+	assert.equal(primaryOriginChecks, 1);
 
 	const stored = bucket.readJson<DownloadList>(DOWNLOAD_LIST_R2_KEY);
 	assert.deepEqual(
 		stored.items.find((item) => item.id === 'mumble'),
 		{
 			...mumble,
+			url: 'https://d.playdota2.win:8081/mumble_client-1.5.915.x64.exe',
 			filename: 'mumble_client-1.5.915.x64.exe',
 			version: '1.5.915',
 			size: '2.0MB',
@@ -313,4 +351,5 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 	assert.equal(second.failed, 0);
 	assert.deepEqual(assetDownloads, []);
 	assert.equal(mumbleFallbackChecks, 2);
+	assert.equal(primaryOriginChecks, 1);
 });
