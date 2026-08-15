@@ -48,6 +48,8 @@ export interface RustDeskConfig {
 	key: string;
 }
 
+export type R2BackupSourceType = 'origin' | 'official-release';
+
 /**
  * 外部下载链接在 R2 中的备份状态。
  *
@@ -58,6 +60,12 @@ export interface R2BackupState {
 	status: 'pending' | 'syncing' | 'ready' | 'failed';
 	/** 本次备份对应的源地址，用来避免 URL 修改后误用旧备份 */
 	sourceUrl: string;
+	/** R2 对象中实际文件的名称，用于与原始链接按文件名比较版本 */
+	filename?: string;
+	/** 从实际文件名中提取的纯数字版本号 */
+	version?: string;
+	/** 官方发布更新可以与仍保留的原始链接使用不同 URL */
+	sourceType?: R2BackupSourceType;
 	/** 区分重复/并发同步，防止旧任务覆盖较新的状态 */
 	operationId: string;
 	/** 当前同步任务写入的 R2 对象键 */
@@ -66,6 +74,9 @@ export interface R2BackupState {
 	previousBackup?: {
 		objectKey: string;
 		sourceUrl: string;
+		filename?: string;
+		version?: string;
+		sourceType?: R2BackupSourceType;
 		syncedAt?: number;
 		size?: number;
 	};

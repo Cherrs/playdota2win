@@ -1,8 +1,17 @@
 import { json, type RequestHandler } from '../../http';
 import { signDownloadPath } from '$lib/admin-auth';
+import { generateDownloadToken } from '$lib/auth';
+import {
+	createR2DownloadBackupStore,
+	getDownloadBackupFilename,
+	getDownloadBackupState,
+	getOriginDownloadFilename,
+	getReadyDownloadBackupObjectKey,
+	shouldPreferDownloadBackup
+} from '$lib/server/download-backup';
 import { readDownloadList } from '$lib/server/download-list-store';
 import { getManagedUploadKey } from '$lib/server/download-object';
-import { extractVersion } from '$lib/utils/parseFilename';
+import { extractComparableVersion } from '$lib/utils/download-version';
 import type { DownloadItem, DownloadList } from '$lib/types';
 
 const corsHeaders = {
@@ -29,12 +38,56 @@ function findRustDeskItem(list: DownloadList): DownloadItem | undefined {
 	);
 }
 
-async function resolveDownloadUrl(
+interface ResolvedRustDeskDownload {
+	url: string;
+	filename?: string;
+}
+
+async function resolveDownload(
 	item: DownloadItem,
 	origin: string,
-	signingSecret?: string
-): Promise<string> {
+	signingSecret: string | undefined,
+	r2: R2Bucket | undefined
+): Promise<ResolvedRustDeskDownload> {
 	let url = item.url;
+	let filename = item.filename;
+
+	if (item.storageType === 'link') {
+		filename = getOriginDownloadFilename(item);
+		if (r2) {
+			const backupState = await getDownloadBackupState(createR2DownloadBackupStore(r2), item.id);
+			const backupKey = shouldPreferDownloadBackup(item, backupState)
+				? getReadyDownloadBackupObjectKey(item, backupState)
+				: undefined;
+			let backupExists = false;
+			if (backupKey) {
+				try {
+					backupExists = (await r2.head(backupKey)) !== null;
+				} catch (error) {
+					console.error({
+						component: 'rustdesk_config',
+						event_name: 'rustdesk_backup_inspection_failed',
+						item_id: item.id,
+						error_message: error instanceof Error ? error.message : String(error)
+					});
+				}
+			}
+
+			if (backupKey && backupExists) {
+				if (!signingSecret) throw new Error('R2 download signing is not configured');
+				filename = getDownloadBackupFilename(backupState) || filename;
+				const token = await generateDownloadToken(backupKey, signingSecret);
+				const search = new URLSearchParams({ token, filename });
+				url = `/api/downloads/relay/${backupKey}?${search.toString()}`;
+			} else if (backupKey) {
+				console.warn({
+					component: 'rustdesk_config',
+					event_name: 'newer_rustdesk_backup_unavailable',
+					item_id: item.id
+				});
+			}
+		}
+	}
 
 	if (item.storageType === 'r2') {
 		if (!getManagedUploadKey(item.url, item.platform) || !signingSecret) {
@@ -47,27 +100,21 @@ async function resolveDownloadUrl(
 	if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
 		throw new Error('RustDesk download URL must use HTTP(S)');
 	}
-	return resolved.toString();
+	return { url: resolved.toString(), filename };
 }
 
-function resolveVersion(item: DownloadItem, downloadUrl: string): string {
-	const storedVersion = typeof item.version === 'string' ? item.version.trim() : '';
-	if (storedVersion) {
-		return storedVersion;
-	}
-
-	const candidates = [item.filename, item.url, downloadUrl].filter(
+function resolveVersion(item: DownloadItem, download: ResolvedRustDeskDownload): string {
+	const candidates = [download.filename, download.url].filter(
 		(value): value is string => typeof value === 'string' && value.trim().length > 0
 	);
 
 	for (const candidate of candidates) {
-		const version = extractVersion(candidate);
+		const version = extractComparableVersion(candidate);
 		if (version) {
 			return version;
 		}
 	}
-
-	return '';
+	return typeof item.version === 'string' ? item.version.trim() : '';
 }
 
 export const OPTIONS: RequestHandler = async () => {
@@ -96,12 +143,12 @@ export const GET: RequestHandler = async ({ platform, request }) => {
 		}
 
 		const origin = new URL(request.url).origin;
-		const downloadUrl = await resolveDownloadUrl(item, origin, platform?.env?.ADMIN_SIGNING_SECRET);
+		const download = await resolveDownload(item, origin, platform?.env?.ADMIN_SIGNING_SECRET, r2);
 
 		return json(
 			{
-				downloadUrl,
-				version: resolveVersion(item, downloadUrl),
+				downloadUrl: download.url,
+				version: resolveVersion(item, download),
 				idServer: item.rustdeskConfig.idServer,
 				key: item.rustdeskConfig.key
 			} satisfies RustDeskPublicConfig,

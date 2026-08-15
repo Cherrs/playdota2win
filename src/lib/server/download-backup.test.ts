@@ -5,14 +5,17 @@ import type { DownloadItem, R2BackupState } from '../types.ts';
 import {
 	createR2DownloadBackupStore,
 	deleteDownloadBackup,
+	getDownloadBackupFilename,
 	getDownloadBackupObjectKey,
 	getDownloadBackupState,
+	getOriginDownloadFilename,
 	getReadyDownloadBackupObjectKey,
 	isDownloadBackupReady,
 	isExternalDownloadAvailable,
 	mapWithConcurrency,
 	normalizeExternalDownloadUrl,
 	queueDownloadBackup,
+	shouldPreferDownloadBackup,
 	shouldUseDownloadBackup,
 	syncDownloadBackup,
 	type DownloadBackupBucket,
@@ -301,6 +304,67 @@ test('does not use an R2 backup created for an older source URL', () => {
 		}),
 		undefined
 	);
+});
+
+test('prefers only a strictly newer official-release backup by filename', () => {
+	const item = linkItem({
+		filename: 'rustdesk-1.5.0-x86_64.exe',
+		url: 'https://downloads.example.com/rustdesk-1.4.9-x86_64.exe'
+	});
+	const newerState: R2BackupState = {
+		status: 'ready',
+		sourceUrl:
+			'https://github.com/rustdesk/rustdesk/releases/download/1.5.0/rustdesk-1.5.0-x86_64.exe',
+		filename: 'rustdesk-1.5.0-x86_64.exe',
+		version: '1.5.0',
+		sourceType: 'official-release',
+		operationId: 'newer-release',
+		objectKey: 'mirrors/item-123/newer-release',
+		updatedAt: 1
+	};
+	const equalState: R2BackupState = {
+		...newerState,
+		filename: 'rustdesk-1.4.9-x86_64.exe',
+		version: '1.4.9'
+	};
+
+	assert.equal(getOriginDownloadFilename(item), 'rustdesk-1.4.9-x86_64.exe');
+	assert.equal(getDownloadBackupFilename(newerState), 'rustdesk-1.5.0-x86_64.exe');
+	assert.equal(isDownloadBackupReady(item, newerState), true);
+	assert.equal(shouldPreferDownloadBackup(item, newerState), true);
+	assert.equal(shouldPreferDownloadBackup(item, equalState), false);
+});
+
+test('manual origin sync preserves an equal or newer official release backup', async () => {
+	const store = new MemoryStore();
+	const bucket = new MemoryBucket();
+	const item = linkItem({
+		filename: 'mumble_client-1.5.901.x64.exe',
+		url: 'https://downloads.example.com/mumble_client-1.5.901.x64.exe'
+	});
+	const releaseItem = {
+		...item,
+		filename: 'mumble_client-1.5.915.x64.exe',
+		version: '1.5.915',
+		url: 'https://github.com/mumble-voip/mumble/releases/download/v1.5.915/mumble_client-1.5.915.x64.exe'
+	};
+	const releaseJob = await queueDownloadBackup(store, releaseItem, {
+		logger: quietLogger,
+		sourceType: 'official-release'
+	});
+	const releaseState = await syncDownloadBackup(releaseItem, store, bucket, {
+		operationId: releaseJob.operationId,
+		logger: quietLogger,
+		sourceType: 'official-release',
+		fetchImpl: async () => new Response('release')
+	});
+
+	const manualState = await queueDownloadBackup(store, item, { logger: quietLogger });
+	assert.equal(manualState.operationId, releaseState.operationId);
+	assert.equal(manualState.status, 'ready');
+	assert.equal(manualState.filename, 'mumble_client-1.5.915.x64.exe');
+	assert.equal(manualState.sourceType, 'official-release');
+	assert.equal(bucket.objects.size, 1);
 });
 
 test('forces R2 without probing the external source', async () => {

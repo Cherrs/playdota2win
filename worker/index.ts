@@ -5,6 +5,7 @@ import * as adminCategories from './routes/admin/categories';
 import * as adminNicknameKeywords from './routes/admin/nickname-keywords';
 import * as adminDownload from './routes/admin/download-file';
 import * as adminDownloadSync from './routes/admin/download-sync';
+import * as adminSoftwareUpdate from './routes/admin/software-update';
 import * as adminMumbleHealth from './routes/admin/mumble-health';
 import * as adminUploads from './routes/admin/uploads';
 import * as announcements from './routes/public/announcements';
@@ -28,6 +29,7 @@ const API_ROUTES: ApiRoute[] = [
 	exact('/api/admin/announcements', adminAnnouncements),
 	exact('/api/admin/chat/nicknames', adminNicknameKeywords),
 	exact('/api/admin/downloads/sync', adminDownloadSync),
+	exact('/api/admin/downloads/update', adminSoftwareUpdate),
 	exact('/api/admin/mumble/health', adminMumbleHealth),
 	exact('/api/admin/uploads', adminUploads),
 	splat('/api/admin/download', 'path', adminDownload),

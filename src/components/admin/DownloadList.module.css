@@ -284,6 +284,14 @@
 	background: linear-gradient(135deg, #5f8ee6 0%, #7568c8 100%);
 	color: white;
 }
+.btnUpdate {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.35rem;
+	background: linear-gradient(135deg, #2f9d7e 0%, #3788a8 100%);
+	color: white;
+}
 .btnSuccess {
 	background: rgba(107, 203, 119, 0.2);
 	color: #2e8b57;

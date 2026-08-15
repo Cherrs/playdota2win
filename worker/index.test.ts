@@ -52,6 +52,7 @@ const endpoints = [
 	['/api/admin/chat/nicknames', 'GET, PUT, HEAD'],
 	['/api/admin/download/example.zip', 'GET, HEAD'],
 	['/api/admin/downloads/sync', 'POST'],
+	['/api/admin/downloads/update', 'POST'],
 	['/api/admin/mumble/health', 'GET, HEAD'],
 	['/api/admin/uploads', 'PUT'],
 	['/api/announcements', 'GET, HEAD'],
@@ -66,14 +67,14 @@ const endpoints = [
 	['/api/rustdesk', 'GET, OPTIONS, HEAD']
 ] as const;
 
-test('all 19 endpoint paths expose the same 34 explicit methods plus HEAD fallbacks', async () => {
-	assert.equal(endpoints.length, 19);
+test('all 20 endpoint paths expose the same 35 explicit methods plus HEAD fallbacks', async () => {
+	assert.equal(endpoints.length, 20);
 	assert.equal(
 		endpoints.reduce(
 			(count, [, allow]) => count + allow.split(', ').filter((method) => method !== 'HEAD').length,
 			0
 		),
-		34
+		35
 	);
 
 	for (const [path, allow] of endpoints) {

@@ -3,8 +3,11 @@ import type { ApiResponse } from '$lib/types';
 import { verifyDownloadPassword, generateDownloadToken } from '$lib/auth';
 import {
 	createR2DownloadBackupStore,
+	getDownloadBackupFilename,
 	getDownloadBackupState,
-	getReadyDownloadBackupObjectKey
+	getOriginDownloadFilename,
+	getReadyDownloadBackupObjectKey,
+	shouldPreferDownloadBackup
 } from '$lib/server/download-backup';
 import { getManagedUploadKey } from '$lib/server/download-object';
 import { incrementDownloadCount } from '$lib/server/download-count-store';
@@ -253,18 +256,20 @@ export const POST: RequestHandler = async ({ request, platform, url: requestUrl 
 		}
 
 		let url = item.url;
-		let filename = item.filename || getFilenameFromUrl(item.url);
+		let filename =
+			item.storageType === 'link'
+				? getOriginDownloadFilename(item)
+				: item.filename || getFilenameFromUrl(item.url);
 		let resolvedSource: 'origin' | 'r2' = 'origin';
 		const requestedSource = downloadSource;
 
 		if (item.storageType === 'link') {
-			// Source probing used to add up to six seconds to every password-success path.
-			// "auto" now returns the origin immediately; users can explicitly request R2.
-			if (requestedSource === 'r2') {
-				const backupStore = r2 ? createR2DownloadBackupStore(r2) : undefined;
-				const backupState = backupStore
-					? await getDownloadBackupState(backupStore, item.id)
-					: undefined;
+			const backupStore = r2 ? createR2DownloadBackupStore(r2) : undefined;
+			const backupState = backupStore
+				? await getDownloadBackupState(backupStore, item.id)
+				: undefined;
+			const preferNewerBackup = shouldPreferDownloadBackup(item, backupState);
+			if (requestedSource === 'r2' || preferNewerBackup) {
 				const backupKey = getReadyDownloadBackupObjectKey(item, backupState);
 				let backupExists = false;
 				if (r2 && backupKey) {
@@ -282,7 +287,7 @@ export const POST: RequestHandler = async ({ request, platform, url: requestUrl 
 					}
 				}
 
-				if (!r2 || !backupKey || !backupExists) {
+				if (requestedSource === 'r2' && (!r2 || !backupKey || !backupExists)) {
 					return json(
 						{
 							success: false,
@@ -292,22 +297,31 @@ export const POST: RequestHandler = async ({ request, platform, url: requestUrl 
 						{ status: 503 }
 					);
 				}
-
-				const signingSecret = platform?.env?.ADMIN_SIGNING_SECRET;
-				if (!signingSecret) {
-					return json(
-						{
-							success: false,
-							error: '下载签名服务未配置',
-							data: AUTH_RESET_DATA
-						} satisfies ApiResponse,
-						{ status: 500 }
-					);
+				if (!r2 || !backupKey || !backupExists) {
+					console.warn({
+						component: 'download_delivery',
+						event_name: 'newer_download_backup_unavailable',
+						message: 'Newer R2 backup was unavailable; using the original link',
+						item_id: item.id
+					});
+				} else {
+					const signingSecret = platform?.env?.ADMIN_SIGNING_SECRET;
+					if (!signingSecret) {
+						return json(
+							{
+								success: false,
+								error: '下载签名服务未配置',
+								data: AUTH_RESET_DATA
+							} satisfies ApiResponse,
+							{ status: 500 }
+						);
+					}
+					filename = getDownloadBackupFilename(backupState) || item.filename || filename;
+					const token = await generateDownloadToken(backupKey, signingSecret);
+					const search = new URLSearchParams({ token, filename });
+					url = `/api/downloads/relay/${backupKey}?${search.toString()}`;
+					resolvedSource = 'r2';
 				}
-				const token = await generateDownloadToken(backupKey, signingSecret);
-				const search = new URLSearchParams({ token, filename });
-				url = `/api/downloads/relay/${backupKey}?${search.toString()}`;
-				resolvedSource = 'r2';
 			}
 		} else if (item.storageType === 'r2') {
 			const key = getManagedUploadKey(item.url, item.platform);

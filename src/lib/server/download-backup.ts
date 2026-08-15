@@ -1,5 +1,6 @@
-import type { DownloadItem, R2BackupState } from '../types.ts';
+import type { DownloadItem, R2BackupSourceType, R2BackupState } from '../types.ts';
 import { MAX_EXTERNAL_BACKUP_BYTES } from '../upload-limits.ts';
+import { compareVersionedFilenames, extractComparableVersion } from '../utils/download-version.ts';
 import { buildContentDisposition, sanitizeFilename } from '../utils/filename.ts';
 import { isPrivateNetworkHostname } from '../utils/public-url.ts';
 
@@ -110,6 +111,7 @@ interface SyncDownloadBackupOptions {
 	fetchImpl?: FetchLike;
 	logger?: DownloadBackupLogger;
 	operationId?: string;
+	sourceType?: R2BackupSourceType;
 	trigger?: DownloadBackupTrigger;
 	/** Test/operational override; production defaults to MAX_EXTERNAL_BACKUP_BYTES. */
 	maxBytes?: number;
@@ -117,11 +119,12 @@ interface SyncDownloadBackupOptions {
 
 interface QueueDownloadBackupOptions {
 	logger?: DownloadBackupLogger;
+	sourceType?: R2BackupSourceType;
 	trigger?: DownloadBackupTrigger;
 }
 
 export type DownloadBackupTrigger =
-	'create' | 'url_update' | 'manual_single' | 'manual_bulk' | 'unspecified';
+	'create' | 'url_update' | 'manual_single' | 'manual_bulk' | 'release_update' | 'unspecified';
 
 export type DownloadBackupLogLevel = 'info' | 'warn' | 'error';
 
@@ -505,6 +508,26 @@ function filenameFromUrl(value: string): string {
 	}
 }
 
+function selectSourceFilename(item: DownloadItem, sourceUrl: string): string {
+	const urlFilename = filenameFromUrl(sourceUrl);
+	const preferred = extractComparableVersion(urlFilename)
+		? urlFilename
+		: item.filename || urlFilename;
+	return sanitizeFilename(preferred).slice(0, 512);
+}
+
+/** The original link's URL filename wins when it exposes a version. */
+export function getOriginDownloadFilename(item: DownloadItem): string {
+	return selectSourceFilename(item, item.url);
+}
+
+export function getDownloadBackupFilename(state: R2BackupState | undefined): string | undefined {
+	if (!state) return undefined;
+	if (state.filename) return state.filename;
+	const sourceFilename = filenameFromUrl(state.sourceUrl);
+	return sourceFilename === 'download' ? undefined : sourceFilename;
+}
+
 /** 仅允许服务器可以直接获取的绝对 HTTP(S) 下载地址。 */
 export function normalizeExternalDownloadUrl(value: string): string {
 	const trimmed = value.trim();
@@ -596,6 +619,7 @@ export async function queueDownloadBackup(
 ): Promise<R2BackupState> {
 	const logger = options.logger ?? consoleLogger;
 	const trigger = options.trigger ?? 'unspecified';
+	const sourceType = options.sourceType ?? 'origin';
 	const operationId = crypto.randomUUID();
 	let sourceUrl: string;
 	try {
@@ -613,6 +637,8 @@ export async function queueDownloadBackup(
 		});
 		throw error;
 	}
+	const filename = selectSourceFilename(item, sourceUrl);
+	const version = extractComparableVersion(filename);
 	let previousSnapshot: DownloadBackupStateSnapshot<R2BackupState> | undefined;
 	try {
 		previousSnapshot = await getDownloadBackupStateSnapshot(store, item.id);
@@ -636,9 +662,37 @@ export async function queueDownloadBackup(
 		);
 		throw error;
 	}
+	const previousState = previousSnapshot?.value;
+	if (sourceType === 'origin' && previousState?.status === 'ready') {
+		const previousFilename = getDownloadBackupFilename(previousState);
+		const comparison = previousFilename
+			? compareVersionedFilenames(filename, previousFilename)
+			: null;
+		if (previousState.sourceType === 'official-release' && comparison !== null && comparison <= 0) {
+			writeBackupLog(
+				logger,
+				'info',
+				'download_backup_preserved',
+				'Kept an equal or newer official release backup',
+				{
+					stage: 'queued',
+					outcome: 'skipped',
+					trigger,
+					item_id: item.id,
+					operation_id: previousState.operationId,
+					candidate_filename: filename,
+					backup_filename: previousFilename
+				}
+			);
+			return previousState;
+		}
+	}
 	const state: R2BackupState = {
 		status: 'pending',
 		sourceUrl,
+		filename,
+		...(version ? { version } : {}),
+		sourceType,
 		operationId,
 		objectKey: getDownloadBackupObjectKey(item.id, operationId),
 		previousBackup:
@@ -646,6 +700,9 @@ export async function queueDownloadBackup(
 				? {
 						objectKey: previousSnapshot.value.objectKey || getDownloadBackupObjectKey(item.id),
 						sourceUrl: previousSnapshot.value.sourceUrl,
+						filename: previousSnapshot.value.filename,
+						version: previousSnapshot.value.version,
+						sourceType: previousSnapshot.value.sourceType,
 						syncedAt: previousSnapshot.value.syncedAt,
 						size: previousSnapshot.value.size
 					}
@@ -686,6 +743,9 @@ export function isDownloadBackupReady(
 	state: R2BackupState | undefined
 ): state is R2BackupState & { status: 'ready' } {
 	if (state?.status !== 'ready') return false;
+	if (state.sourceType === 'official-release') {
+		return Boolean(getDownloadBackupFilename(state) && state.version);
+	}
 	try {
 		return state.sourceUrl === normalizeExternalDownloadUrl(item.url);
 	} catch {
@@ -693,7 +753,18 @@ export function isDownloadBackupReady(
 	}
 }
 
-/** 返回当前下载项已就绪且源地址一致的 R2 对象键。 */
+/** Auto download uses R2 only when its filename contains a strictly newer version. */
+export function shouldPreferDownloadBackup(
+	item: DownloadItem,
+	state: R2BackupState | undefined
+): boolean {
+	if (!isDownloadBackupReady(item, state)) return false;
+	const backupFilename = getDownloadBackupFilename(state);
+	if (!backupFilename) return false;
+	return compareVersionedFilenames(backupFilename, getOriginDownloadFilename(item)) === 1;
+}
+
+/** 返回当前原始链接镜像或受管官方发布更新对应的已就绪 R2 对象键。 */
 export function getReadyDownloadBackupObjectKey(
 	item: DownloadItem,
 	state: R2BackupState | undefined
@@ -738,6 +809,7 @@ export async function syncDownloadBackup(
 	const fetchImpl = options.fetchImpl ?? fetch;
 	const logger = options.logger ?? consoleLogger;
 	const trigger = options.trigger ?? 'unspecified';
+	const requestedSourceType = options.sourceType ?? 'origin';
 	const maxBytes = options.maxBytes ?? MAX_EXTERNAL_BACKUP_BYTES;
 	if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
 		throw new Error('Invalid backup size limit');
@@ -759,6 +831,8 @@ export async function syncDownloadBackup(
 		});
 		throw error;
 	}
+	const requestedFilename = selectSourceFilename(item, sourceUrl);
+	const requestedVersion = extractComparableVersion(requestedFilename);
 	const baseLogFields = {
 		trigger,
 		item_id: item.id,
@@ -801,6 +875,9 @@ export async function syncDownloadBackup(
 			queuedState || {
 				status: 'failed',
 				sourceUrl,
+				filename: requestedFilename,
+				version: requestedVersion,
+				sourceType: requestedSourceType,
 				operationId,
 				updatedAt: Date.now(),
 				error: 'Backup job was superseded'
@@ -812,6 +889,9 @@ export async function syncDownloadBackup(
 			? {
 					objectKey: queuedState.objectKey || getDownloadBackupObjectKey(item.id),
 					sourceUrl: queuedState.sourceUrl,
+					filename: queuedState.filename,
+					version: queuedState.version,
+					sourceType: queuedState.sourceType,
 					syncedAt: queuedState.syncedAt,
 					size: queuedState.size
 				}
@@ -819,6 +899,11 @@ export async function syncDownloadBackup(
 	const syncingState: R2BackupState = {
 		status: 'syncing',
 		sourceUrl,
+		filename: options.operationId ? queuedState?.filename || requestedFilename : requestedFilename,
+		version: options.operationId ? queuedState?.version || requestedVersion : requestedVersion,
+		sourceType: options.operationId
+			? queuedState?.sourceType || requestedSourceType
+			: requestedSourceType,
 		operationId,
 		objectKey:
 			(options.operationId ? queuedState?.objectKey : undefined) ||
@@ -853,6 +938,9 @@ export async function syncDownloadBackup(
 				activeState || {
 					status: 'failed',
 					sourceUrl,
+					filename: requestedFilename,
+					version: requestedVersion,
+					sourceType: requestedSourceType,
 					operationId,
 					updatedAt: Date.now(),
 					error: 'Backup job was superseded'
@@ -954,7 +1042,7 @@ export async function syncDownloadBackup(
 			return activeState || syncingState;
 		}
 
-		const filename = sanitizeFilename(item.filename || filenameFromUrl(sourceUrl)).slice(0, 512);
+		const filename = syncingState.filename || requestedFilename;
 		const objectKey = syncingState.objectKey;
 		if (!objectKey) throw new Error('R2 backup object key is missing');
 		stage = 'stream_to_r2';
@@ -980,7 +1068,9 @@ export async function syncDownloadBackup(
 				},
 				customMetadata: {
 					downloadItemId: item.id,
-					filename
+					filename,
+					...(syncingState.version ? { version: syncingState.version } : {}),
+					...(syncingState.sourceType ? { sourceType: syncingState.sourceType } : {})
 				}
 			},
 			maxBytes
@@ -996,9 +1086,13 @@ export async function syncDownloadBackup(
 		});
 
 		const now = Date.now();
+		const readyVersion = syncingState.version || extractComparableVersion(filename);
 		const readyState: R2BackupState = {
 			status: 'ready',
 			sourceUrl,
+			filename,
+			...(readyVersion ? { version: readyVersion } : {}),
+			sourceType: syncingState.sourceType,
 			operationId,
 			objectKey: syncingState.objectKey,
 			updatedAt: now,
@@ -1051,6 +1145,9 @@ export async function syncDownloadBackup(
 				currentState || {
 					status: 'failed',
 					sourceUrl,
+					filename,
+					version: syncingState.version,
+					sourceType: syncingState.sourceType,
 					operationId,
 					updatedAt: Date.now(),
 					error: 'Backup job was superseded'
@@ -1092,26 +1189,34 @@ export async function syncDownloadBackup(
 		if (response) await cancelResponseBody(response);
 		const failure = errorMessage(error, sourceUrl);
 		const previousBackup = syncingState.previousBackup;
-		const failedState: R2BackupState =
-			previousBackup?.sourceUrl === sourceUrl
-				? {
-						status: 'ready',
-						sourceUrl,
-						operationId,
-						objectKey: previousBackup.objectKey,
-						updatedAt: Date.now(),
-						syncedAt: previousBackup.syncedAt,
-						size: previousBackup.size,
-						error: `Latest sync failed: ${failure}`.slice(0, MAX_ERROR_LENGTH)
-					}
-				: {
-						status: 'failed',
-						sourceUrl,
-						operationId,
-						previousBackup,
-						updatedAt: Date.now(),
-						error: failure
-					};
+		const preservePreviousBackup =
+			previousBackup &&
+			(previousBackup.sourceUrl === sourceUrl || syncingState.sourceType === 'official-release');
+		const failedState: R2BackupState = preservePreviousBackup
+			? {
+					status: 'ready',
+					sourceUrl: previousBackup.sourceUrl,
+					filename: previousBackup.filename,
+					version: previousBackup.version,
+					sourceType: previousBackup.sourceType,
+					operationId,
+					objectKey: previousBackup.objectKey,
+					updatedAt: Date.now(),
+					syncedAt: previousBackup.syncedAt,
+					size: previousBackup.size,
+					error: `Latest sync failed: ${failure}`.slice(0, MAX_ERROR_LENGTH)
+				}
+			: {
+					status: 'failed',
+					sourceUrl,
+					filename: syncingState.filename,
+					version: syncingState.version,
+					sourceType: syncingState.sourceType,
+					operationId,
+					previousBackup,
+					updatedAt: Date.now(),
+					error: failure
+				};
 		const failureLogFields = {
 			...baseLogFields,
 			stage,

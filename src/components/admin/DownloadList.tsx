@@ -20,6 +20,19 @@ interface SyncDownloadsResult {
 	failed?: number;
 }
 
+interface SoftwareUpdateResult {
+	label: string;
+	status: 'updated' | 'current' | 'failed';
+	error?: string;
+}
+
+interface SoftwareUpdateSummary {
+	updated: number;
+	current: number;
+	failed: number;
+	results: SoftwareUpdateResult[];
+}
+
 interface BulkMutationResult {
 	updated?: DownloadItem[];
 	deletedIds?: string[];
@@ -83,10 +96,12 @@ export default function DownloadList({
 	const [error, setError] = useState('');
 	const [success, setSuccess] = useState('');
 	const [syncingLinks, setSyncingLinks] = useState(false);
+	const [checkingUpdates, setCheckingUpdates] = useState(false);
 	const [bulkUpdating, setBulkUpdating] = useState(false);
 	const [showBulkActions, setShowBulkActions] = useState(false);
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 	const syncControllerRef = useRef<AbortController | null>(null);
+	const updateControllerRef = useRef<AbortController | null>(null);
 	const bulkControllerRef = useRef<AbortController | null>(null);
 	const mountedRef = useRef(false);
 	const linkDownloads = useMemo(
@@ -102,6 +117,9 @@ export default function DownloadList({
 		mountedRef.current = true;
 		return () => {
 			mountedRef.current = false;
+			syncControllerRef.current?.abort();
+			updateControllerRef.current?.abort();
+			bulkControllerRef.current?.abort();
 		};
 	}, []);
 
@@ -110,6 +128,7 @@ export default function DownloadList({
 			linkDownloads.length === 0 ||
 			syncingLinks ||
 			syncControllerRef.current ||
+			updateControllerRef.current ||
 			bulkControllerRef.current
 		) {
 			return;
@@ -173,6 +192,61 @@ export default function DownloadList({
 		}
 	}
 
+	async function handleCheckUpdates() {
+		if (
+			checkingUpdates ||
+			updateControllerRef.current ||
+			syncControllerRef.current ||
+			bulkControllerRef.current
+		) {
+			return;
+		}
+		const controller = new AbortController();
+		updateControllerRef.current = controller;
+		setCheckingUpdates(true);
+		setError('');
+		setSuccess('');
+
+		try {
+			const response = await fetch('/api/admin/downloads/update', {
+				method: 'POST',
+				signal: controller.signal
+			});
+			const data = (await response.json()) as ApiResponse<SoftwareUpdateSummary>;
+			if (!response.ok || !data.success || !data.data) {
+				throw new Error(data.error || `检查更新失败（HTTP ${response.status}）`);
+			}
+			if (controller.signal.aborted) return;
+			await onReload({ silent: true });
+			if (controller.signal.aborted || !mountedRef.current) return;
+
+			const summary = data.data;
+			if (summary.updated > 0 || summary.current > 0) {
+				setSuccess(`检查完成：更新 ${summary.updated} 个，已是最新 ${summary.current} 个。`);
+			}
+			if (summary.failed > 0) {
+				const firstFailure = summary.results.find((result) => result.status === 'failed');
+				setError(
+					`检查更新失败 ${summary.failed} 个。${
+						firstFailure
+							? ` ${firstFailure.label}：${getBriefBackupError(firstFailure.error || '未知错误')}`
+							: ''
+					}`
+				);
+			}
+		} catch (caught) {
+			if (caught instanceof DOMException && caught.name === 'AbortError') return;
+			if (mountedRef.current) {
+				setError(caught instanceof Error ? caught.message : '检查更新失败');
+			}
+		} finally {
+			if (updateControllerRef.current === controller) {
+				updateControllerRef.current = null;
+				if (mountedRef.current) setCheckingUpdates(false);
+			}
+		}
+	}
+
 	function toggleSelectAll() {
 		if (bulkUpdating) return;
 		setSelectedIds(
@@ -192,7 +266,14 @@ export default function DownloadList({
 	}
 
 	async function handleBulkMoveToCategory(categoryId: string | null) {
-		if (bulkUpdating || bulkControllerRef.current || syncControllerRef.current) return;
+		if (
+			bulkUpdating ||
+			bulkControllerRef.current ||
+			syncControllerRef.current ||
+			updateControllerRef.current
+		) {
+			return;
+		}
 		if (selectedItemIds.length === 0) {
 			setError('请先选择要移动的下载项');
 			return;
@@ -245,7 +326,14 @@ export default function DownloadList({
 	}
 
 	async function handleBulkDelete() {
-		if (bulkUpdating || bulkControllerRef.current || syncControllerRef.current) return;
+		if (
+			bulkUpdating ||
+			bulkControllerRef.current ||
+			syncControllerRef.current ||
+			updateControllerRef.current
+		) {
+			return;
+		}
 		if (selectedItemIds.length === 0) {
 			setError('请先选择要删除的下载项');
 			return;
@@ -307,10 +395,28 @@ export default function DownloadList({
 				{downloads.length > 0 && (
 					<div className={styles.sectionHeaderActions}>
 						<button
+							className={classNames(styles.btn, styles.btnSmall, styles.btnUpdate)}
+							type="button"
+							onClick={() => void handleCheckUpdates()}
+							disabled={checkingUpdates || syncingLinks || bulkUpdating}
+							title="检查官方稳定版并更新 Mumble、RustDesk 的 R2 文件"
+						>
+							{checkingUpdates ? (
+								<>
+									<span className={styles.buttonSpinner} aria-hidden="true" />
+									正在检查并更新...
+								</>
+							) : (
+								'检查 Mumble / RustDesk 更新'
+							)}
+						</button>
+						<button
 							className={classNames(styles.btn, styles.btnSmall, styles.btnSync)}
 							type="button"
 							onClick={() => void handleSyncLinks()}
-							disabled={syncingLinks || bulkUpdating || linkDownloads.length === 0}
+							disabled={
+								checkingUpdates || syncingLinks || bulkUpdating || linkDownloads.length === 0
+							}
 							title={
 								linkDownloads.length === 0 ? '没有可同步的外部链接' : '将所有外部链接备份到 R2'
 							}
@@ -331,7 +437,7 @@ export default function DownloadList({
 								!showBulkActions && styles.btnPrimary
 							)}
 							type="button"
-							disabled={syncingLinks || bulkUpdating}
+							disabled={checkingUpdates || syncingLinks || bulkUpdating}
 							onClick={() => {
 								setShowBulkActions((shown) => {
 									if (shown) setSelectedIds(new Set());
@@ -480,6 +586,7 @@ export default function DownloadList({
 										)}
 									</div>
 									<div className={styles.itemMeta}>
+										<span>版本 {item.version}</span>
 										<span>📦 {item.size}</span>
 										{item.description && <span>📝 {item.description}</span>}
 										{item.filename && <span>📝 {item.filename}</span>}
@@ -514,6 +621,7 @@ export default function DownloadList({
 											item.enabled ? styles.btnWarning : styles.btnSuccess
 										)}
 										type="button"
+										disabled={checkingUpdates}
 										onClick={() => void onToggleEnabled(item)}
 									>
 										{item.enabled ? '禁用' : '启用'}
@@ -521,6 +629,7 @@ export default function DownloadList({
 									<button
 										className={classNames(styles.btn, styles.btnSmall)}
 										type="button"
+										disabled={checkingUpdates}
 										onClick={() => onEdit(item)}
 									>
 										编辑
@@ -528,6 +637,7 @@ export default function DownloadList({
 									<button
 										className={classNames(styles.btn, styles.btnSmall, styles.btnDanger)}
 										type="button"
+										disabled={checkingUpdates}
 										onClick={() => void onDelete(item.id)}
 									>
 										删除
