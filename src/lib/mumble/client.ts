@@ -8,7 +8,9 @@ import type {
 	MumbleTextMessage,
 	MumbleUser
 } from '$lib/types';
+import type { IceServer, MumbleIceConfig } from '$lib/types';
 import { dedupeChannels } from './utils.ts';
+import { readNetworkStats, type MumbleNetworkStats } from './stats.ts';
 
 export type MumbleClientMode = 'interactive' | 'monitor';
 export type MumbleAudioPermission = 'unknown' | 'granted' | 'denied' | 'unsupported';
@@ -36,6 +38,7 @@ export interface MumbleClientSnapshot {
 	voiceFailed: boolean;
 	audioPermission: MumbleAudioPermission;
 	playbackBlocked: boolean;
+	network: MumbleNetworkStats | null;
 }
 
 export interface CreateMumbleClientOptions {
@@ -99,7 +102,8 @@ export function createInitialMumbleClientSnapshot(): MumbleClientSnapshot {
 		voiceConnected: false,
 		voiceFailed: false,
 		audioPermission: 'unknown',
-		playbackBlocked: false
+		playbackBlocked: false,
+		network: null
 	};
 }
 
@@ -131,6 +135,8 @@ function normalizeUser(user: MumbleProxyUserPayload): MumbleUser {
 const KNOWN_SERVER_EVENT_TYPES = new Set([
 	'connected',
 	'answer',
+	'offer',
+	'ice_config',
 	'ice_candidate',
 	'channel_updated',
 	'user_joined',
@@ -216,6 +222,16 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 	let voiceRequestGeneration = 0;
 	let voiceRequest: Promise<void> | null = null;
 	let pendingVoiceRequest = false;
+	let protocolVersion = 1;
+	let iceServers: IceServer[] = options.config.iceServers;
+	let iceRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+	let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+	let negotiationTimer: ReturnType<typeof setTimeout> | null = null;
+	let statsTimer: ReturnType<typeof setInterval> | null = null;
+	let connectionTimer: ReturnType<typeof setTimeout> | null = null;
+	let recoveryAttempts = 0;
+	let pendingCandidates: RTCIceCandidateInit[] = [];
+	let incomingMessages = Promise.resolve();
 	const remoteAudioElements = new Map<string, HTMLAudioElement>();
 
 	function getSnapshot(): MumbleClientSnapshot {
@@ -289,8 +305,90 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 		remoteAudioElements.delete(streamId);
 	}
 
+	function clearSessionTimers(): void {
+		if (connectionTimer) clearTimeout(connectionTimer);
+		if (iceRefreshTimer) clearTimeout(iceRefreshTimer);
+		connectionTimer = iceRefreshTimer = null;
+	}
+
+	function failConnection(reason: string): void {
+		resetSocketWithoutReconnect('connection recovery');
+		handleSocketClose(reason);
+		patch({ errorMessage: reason });
+	}
+
+	function armNegotiationTimeout(): void {
+		if (negotiationTimer) clearTimeout(negotiationTimer);
+		negotiationTimer = setTimeout(() => {
+			negotiationTimer = null;
+			failConnection('语音连接超时，正在重新连接。');
+		}, 15000);
+	}
+
+	function applyIceConfig(config: MumbleIceConfig): void {
+		iceServers = config.ice_servers;
+		peerConnection?.setConfiguration({ iceServers });
+		if (iceRefreshTimer) clearTimeout(iceRefreshTimer);
+		iceRefreshTimer = null;
+		if (config.expires_at !== null) {
+			iceRefreshTimer = setTimeout(
+				() => {
+					iceRefreshTimer = null;
+					sendEvent({ type: 'ice_refresh' });
+					// A lost refresh response must not leave an apparently healthy
+					// voice session using credentials that have expired.
+					if (peerConnection) armNegotiationTimeout();
+				},
+				Math.max(1000, config.expires_at * 1000 - Date.now() - 60000)
+			);
+		}
+	}
+
+	function recoverVoice(delay = 0): void {
+		if (recoveryTimer || !peerConnection || !snapshot.connected) return;
+		if (recoveryAttempts > 0 && negotiationTimer) return;
+		recoveryTimer = setTimeout(() => {
+			recoveryTimer = null;
+			if (!peerConnection || !snapshot.connected) return;
+			if (protocolVersion < 2 || recoveryAttempts >= 1) {
+				failConnection('语音连接中断，正在重新连接。');
+				return;
+			}
+			recoveryAttempts += 1;
+			// Refresh first, then request a server offer using the new ICE
+			// configuration. Only the server creates v2 offers (no glare).
+			sendEvent({ type: 'ice_refresh' });
+			armNegotiationTimeout();
+		}, delay);
+	}
+
+	async function updateNetworkStats(connection: RTCPeerConnection): Promise<void> {
+		if (typeof connection.getStats !== 'function') return;
+		try {
+			const network = readNetworkStats(await connection.getStats());
+			if (!destroyed && peerConnection === connection) patch({ network });
+		} catch {
+			// Stats can be unavailable while a connection is closing.
+		}
+	}
+
+	async function flushCandidates(connection: RTCPeerConnection): Promise<void> {
+		if (peerConnection !== connection) return;
+		for (const candidate of pendingCandidates.splice(0)) {
+			if (peerConnection !== connection) return;
+			await connection.addIceCandidate(candidate);
+		}
+	}
+
 	function cleanupPeerConnection(stopLocalStream: boolean): void {
 		peerConnectionGeneration += 1;
+		if (recoveryTimer) clearTimeout(recoveryTimer);
+		if (negotiationTimer) clearTimeout(negotiationTimer);
+		if (statsTimer) clearInterval(statsTimer);
+		recoveryTimer = negotiationTimer = null;
+		statsTimer = null;
+		recoveryAttempts = 0;
+		pendingCandidates = [];
 		if (peerConnection) {
 			peerConnection.ontrack = null;
 			peerConnection.onicecandidate = null;
@@ -318,7 +416,8 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 			voiceConnected: false,
 			voiceFailed: false,
 			playbackBlocked: false,
-			voiceAvailable: localStream !== null
+			voiceAvailable: localStream !== null,
+			network: null
 		});
 	}
 
@@ -351,7 +450,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 		let connection: RTCPeerConnection;
 		try {
 			connection = new RTCPeerConnection({
-				iceServers: options.config.iceServers
+				iceServers
 			});
 		} catch (error) {
 			patch({
@@ -440,12 +539,19 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 				connection.iceConnectionState === 'connected' ||
 				connection.iceConnectionState === 'completed'
 			) {
-				patch({ voiceConnected: true, voiceFailed: false });
+				if (recoveryTimer) clearTimeout(recoveryTimer);
+				if (negotiationTimer) clearTimeout(negotiationTimer);
+				recoveryTimer = negotiationTimer = null;
+				recoveryAttempts = 0;
+				patch({ voiceConnected: true, voiceFailed: false, errorMessage: '' });
+				void updateNetworkStats(connection);
+				if (!statsTimer) statsTimer = setInterval(() => void updateNetworkStats(connection), 5000);
 				return;
 			}
 
 			if (connection.iceConnectionState === 'failed') {
 				patch({ voiceConnected: false, voiceFailed: true });
+				recoverVoice();
 				return;
 			}
 
@@ -454,9 +560,15 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 				connection.iceConnectionState === 'disconnected'
 			) {
 				patch({ voiceConnected: false });
+				if (connection.iceConnectionState === 'disconnected') recoverVoice(3000);
 			}
 		};
 
+		armNegotiationTimeout();
+		if (protocolVersion >= 2) {
+			sendEvent({ type: 'start_voice' });
+			return;
+		}
 		try {
 			const offer = await connection.createOffer();
 			if (!isCurrent()) return;
@@ -545,7 +657,8 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 
 		if (snapshot.connected) {
 			try {
-				await ensurePeerConnection();
+				if (peerConnection && snapshot.voiceFailed) recoverVoice();
+				else await ensurePeerConnection();
 			} catch (error) {
 				if (destroyed || generation !== voiceRequestGeneration) return;
 				console.error('Failed to initialize WebRTC voice:', error);
@@ -607,6 +720,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 	}
 
 	function handleSocketClose(reason: string): void {
+		clearSessionTimers();
 		socket = null;
 		cleanupPeerConnection(false);
 		patch({
@@ -631,6 +745,11 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 
 		switch (parsed.type) {
 			case 'connected': {
+				if (connectionTimer) clearTimeout(connectionTimer);
+				connectionTimer = null;
+				protocolVersion = parsed.data.protocol_version ?? 1;
+				if (parsed.data.ice) applyIceConfig(parsed.data.ice);
+				else iceServers = options.config.iceServers;
 				reconnectAttempts = 0;
 				const normalizedUsers = parsed.data.users.map(normalizeUser);
 				const normalizedChannels = dedupeChannels(parsed.data.channels.map(normalizeChannel));
@@ -659,6 +778,38 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 				}
 				return;
 			}
+			case 'ice_config':
+				applyIceConfig(parsed.data);
+				if (peerConnection) {
+					recoveryAttempts = Math.max(recoveryAttempts, 1);
+					sendEvent({ type: 'ice_restart' });
+					armNegotiationTimeout();
+				}
+				return;
+			case 'offer': {
+				const connection = peerConnection;
+				if (!connection) return;
+				try {
+					await connection.setRemoteDescription({ type: 'offer', sdp: parsed.data.sdp });
+					await flushCandidates(connection);
+					const answer = await connection.createAnswer();
+					if (destroyed || socket !== sourceSocket || peerConnection !== connection) return;
+					await connection.setLocalDescription(answer);
+					if (destroyed || socket !== sourceSocket || peerConnection !== connection) return;
+					if (!answer.sdp) throw new Error('empty answer');
+					sendEvent({ type: 'answer', data: { sdp: answer.sdp } });
+					// Track changes can renegotiate an already connected transport.
+					if (snapshot.voiceConnected && recoveryAttempts === 0 && negotiationTimer) {
+						clearTimeout(negotiationTimer);
+						negotiationTimer = null;
+					}
+				} catch {
+					if (destroyed || socket !== sourceSocket || peerConnection !== connection) return;
+					failConnection('语音协商失败，正在重新连接。');
+				}
+				return;
+			}
+
 			case 'answer':
 				if (!peerConnection) {
 					return;
@@ -671,6 +822,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 							type: 'answer',
 							sdp: parsed.data.sdp
 						});
+						await flushCandidates(connection);
 					} catch (error) {
 						if (destroyed || socket !== sourceSocket || peerConnection !== connection) return;
 						console.error('Failed to set remote description:', error);
@@ -690,11 +842,15 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 				{
 					const connection = peerConnection;
 					try {
-						await connection.addIceCandidate({
+						const candidate = {
 							candidate: parsed.data.candidate,
 							sdpMid: parsed.data.sdp_mid,
 							sdpMLineIndex: parsed.data.sdp_mline_index
-						});
+						};
+						if (!connection.remoteDescription) {
+							if (pendingCandidates.length >= 128) throw new Error('too many candidates');
+							pendingCandidates.push(candidate);
+						} else await connection.addIceCandidate(candidate);
 					} catch (error) {
 						if (destroyed || socket !== sourceSocket || peerConnection !== connection) return;
 						console.error('Failed to add ICE candidate:', error);
@@ -708,6 +864,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 				updateUsers([...snapshot.users, normalizeUser(parsed.data)]);
 				return;
 			case 'user_left':
+				removeRemoteAudio(`mumble-stream-${parsed.data.session_id}`);
 				updateUsers(snapshot.users.filter((u) => u.sessionId !== parsed.data.session_id));
 				return;
 			case 'chat_received': {
@@ -742,7 +899,22 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 				return;
 			}
 			case 'error':
-				patch({ errorMessage: parsed.data.message });
+				if (
+					parsed.data.code === 'mumble_disconnected' ||
+					parsed.data.code === 'connect_failed' ||
+					parsed.data.code === 'voice_error'
+				) {
+					failConnection(parsed.data.message);
+				} else if (parsed.data.code === 'upgrade_required') {
+					shouldReconnect = false;
+					failConnection('语音服务已升级，请刷新网页。');
+				} else {
+					patch({ errorMessage: parsed.data.message });
+					if (parsed.data.code === 'webrtc_disconnected') {
+						patch({ voiceConnected: false, voiceFailed: true });
+						recoverVoice(3000);
+					}
+				}
 				return;
 		}
 	}
@@ -779,6 +951,11 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 			return;
 		}
 		socket = nextSocket;
+		incomingMessages = Promise.resolve();
+		clearSessionTimers();
+		connectionTimer = setTimeout(() => {
+			if (socket === nextSocket) failConnection('连接 Mumble 服务超时，正在重试。');
+		}, 15000);
 
 		nextSocket.onopen = () => {
 			if (destroyed || socket !== nextSocket) return;
@@ -787,7 +964,11 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 
 		nextSocket.onmessage = (event) => {
 			if (typeof event.data === 'string') {
-				void handleSocketMessage(event, nextSocket);
+				incomingMessages = incomingMessages
+					.then(() => handleSocketMessage(event, nextSocket))
+					.catch(() => {
+						if (socket === nextSocket) failConnection('语音服务返回了无效消息，正在重试。');
+					});
 			}
 		};
 
@@ -815,6 +996,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 		shouldReconnect = true;
 		reconnectAttempts = 0;
 		clearReconnectTimer();
+		clearSessionTimers();
 		cleanupPeerConnection(false);
 		patch({
 			status: 'reconnecting',
@@ -869,6 +1051,7 @@ export function createMumbleClient(options: CreateMumbleClientOptions): MumbleCl
 
 	function resetSocketWithoutReconnect(reason: string): void {
 		clearReconnectTimer();
+		clearSessionTimers();
 		const existingSocket = socket;
 		socket = null;
 		if (existingSocket) {

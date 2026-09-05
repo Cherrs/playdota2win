@@ -1,9 +1,7 @@
-import type { IceServer, MumbleProxyConfig } from '$lib/types';
+import type { MumbleProxyConfig } from '$lib/types';
 import type { RuntimePlatform } from '$lib/runtime';
 
-const DEFAULT_STUN_SERVERS = ['stun:stun.l.google.com:19302'];
 const DEFAULT_PROXY_PORT = '8080';
-const VALID_ICE_PROTOCOLS = new Set(['stun:', 'turn:', 'turns:']);
 
 function normalizeUrl(value: string | undefined): string | null {
 	const normalized = value?.trim();
@@ -55,40 +53,6 @@ function isBrowserReachableUrl(value: string, requestUrl?: URL): boolean {
 	}
 }
 
-function parseIceServerUrls(value: string | undefined): string[] {
-	const urls = value
-		? value
-				.split(',')
-				.map((entry) => entry.trim())
-				.filter(Boolean)
-				.filter((entry) => {
-					try {
-						const url = new URL(entry);
-						return VALID_ICE_PROTOCOLS.has(url.protocol) && url.pathname.length > 0;
-					} catch {
-						return false;
-					}
-				})
-		: [];
-
-	return urls.length > 0 ? Array.from(new Set(urls)) : DEFAULT_STUN_SERVERS;
-}
-
-function createIceServers(platform: RuntimePlatform | undefined): IceServer[] {
-	const urls = parseIceServerUrls(platform?.env?.MUMBLE_PROXY_STUN_SERVERS);
-	const username = platform?.env?.MUMBLE_PROXY_TURN_USERNAME?.trim();
-	const credential = platform?.env?.MUMBLE_PROXY_TURN_CREDENTIAL?.trim();
-	const credentials = username && credential ? { username, credential } : null;
-
-	return urls.flatMap((url) => {
-		const isTurn = url.startsWith('turn:') || url.startsWith('turns:');
-		if (isTurn && !credentials) {
-			return [];
-		}
-		return [{ urls: url, ...(isTurn ? credentials : null) }];
-	});
-}
-
 function deriveProxyUrl(requestUrl: URL | undefined, kind: 'ws' | 'health'): string | null {
 	if (!requestUrl) {
 		return null;
@@ -126,7 +90,8 @@ export async function getMumbleProxyConfig(
 
 	return {
 		wsUrl: wsUrl ?? deriveProxyUrl(requestUrl, 'ws')!,
-		iceServers: createIceServers(platform),
+		// Session-scoped ICE credentials arrive directly from MumDota over WSS.
+		iceServers: [],
 		healthUrl:
 			healthUrl && !isBrowserReachableUrl(healthUrl, requestUrl)
 				? null
