@@ -75,6 +75,7 @@ export interface SoftwareUpdateSummary {
 interface UpdateManagedSoftwareOptions {
 	kv: KVNamespace | undefined;
 	r2: R2Bucket;
+	primaryDownloadHostname?: string;
 	fetchImpl?: FetchLike;
 	backupLogger?: DownloadBackupLogger;
 	now?: () => number;
@@ -115,7 +116,6 @@ const MANAGED_SOFTWARE: Record<ManagedSoftware, ManagedSoftwareDefinition> = {
 const MANAGED_SOFTWARE_ORDER: ManagedSoftware[] = ['mumble', 'rustdesk'];
 const RELEASE_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESULT_ERROR_LENGTH = 300;
-const PRIMARY_DOWNLOAD_HOSTNAME = 'd.playdota2.win';
 
 function resultError(error: unknown): string {
 	return (error instanceof Error ? error.message : 'Unknown update error')
@@ -316,15 +316,24 @@ function formatDownloadSize(bytes: number): string {
 
 export function buildVersionedPrimaryDownloadUrl(
 	item: DownloadItem,
-	release: OfficialSoftwareRelease
+	release: OfficialSoftwareRelease,
+	primaryDownloadHostname?: string
 ): string | undefined {
+	const hostname = primaryDownloadHostname?.trim().toLowerCase();
+	if (!hostname) return undefined;
 	let parsed: URL;
 	try {
 		parsed = new URL(item.url);
 	} catch {
 		return undefined;
 	}
-	if (parsed.hostname.toLowerCase() !== PRIMARY_DOWNLOAD_HOSTNAME) return undefined;
+	if (
+		!['http:', 'https:'].includes(parsed.protocol) ||
+		parsed.username ||
+		parsed.password ||
+		parsed.hostname.toLowerCase() !== hostname
+	)
+		return undefined;
 	const separator = parsed.pathname.lastIndexOf('/');
 	parsed.pathname = `${parsed.pathname.slice(0, separator + 1)}${encodeURIComponent(release.filename)}`;
 	parsed.hash = '';
@@ -410,7 +419,7 @@ export async function updateManagedSoftware(
 			}
 			const primaryCandidateUrl =
 				compareNumericVersions(release.version, configuredOriginVersion) > 0
-					? buildVersionedPrimaryDownloadUrl(item, release)
+					? buildVersionedPrimaryDownloadUrl(item, release, options.primaryDownloadHostname)
 					: undefined;
 			const originUrlUpdated = Boolean(
 				primaryCandidateUrl &&

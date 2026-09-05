@@ -5,7 +5,7 @@ import test from 'node:test';
 
 import { addSecurityHeaders, isCrossOriginAdminMutation } from './security.ts';
 
-const target = new URL('https://playdota2.win/api/admin');
+const target = new URL('https://example.com/api/admin');
 
 test('blocks cross-origin state-changing admin requests', () => {
 	assert.equal(
@@ -53,15 +53,15 @@ test('allows same-origin mutations and safe reads', () => {
 test('uses immutable caching only for fingerprinted assets', () => {
 	const asset = addSecurityHeaders(
 		new Response('asset', { headers: { 'Content-Type': 'text/javascript' } }),
-		new URL('https://playdota2.win/assets/index-a1b2c3.js')
+		new URL('https://example.com/assets/index-a1b2c3.js')
 	);
 	const html = addSecurityHeaders(
 		new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
-		new URL('https://playdota2.win/download')
+		new URL('https://example.com/download')
 	);
 	const admin = addSecurityHeaders(
 		new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
-		new URL('https://playdota2.win/admin')
+		new URL('https://example.com/admin')
 	);
 
 	assert.equal(asset.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
@@ -76,10 +76,49 @@ test('production CSP authorizes the home preload and Cloudflare Web Analytics', 
 	const hash = `sha256-${createHash('sha256').update(script).digest('base64')}`;
 	const response = addSecurityHeaders(
 		new Response(html, { headers: { 'Content-Type': 'text/html' } }),
-		new URL('https://playdota2.win/')
+		new URL('https://example.com/')
 	);
 
 	const policy = response.headers.get('Content-Security-Policy') ?? '';
 	assert.ok(policy.includes(`'${hash}'`));
 	assert.match(policy, /script-src[^;]*https:\/\/static\.cloudflareinsights\.com/u);
+});
+
+test('CSP permits the configured voice origin without permitting every WebSocket host', () => {
+	const response = addSecurityHeaders(new Response('ok'), target, {
+		MUMBLE_PROXY_WS_URL: 'wss://relay.example.net:8443/ws?token=test'
+	});
+	const policy = response.headers.get('Content-Security-Policy') ?? '';
+	const sources = policy.match(/connect-src ([^;]+)/u)?.[1].split(' ') ?? [];
+	assert.ok(sources.includes('wss://relay.example.net:8443'));
+	assert.ok(!sources.includes('wss:'));
+	assert.ok(!policy.includes('token=test'));
+});
+
+test('CSP follows the default voice endpoint on HTTPS and local HTTP', () => {
+	for (const [page, endpoint] of [
+		['https://example.com/download', 'wss://example.com:8080'],
+		['http://localhost:5173/download', 'ws://localhost:8080']
+	]) {
+		const response = addSecurityHeaders(new Response('ok'), new URL(page));
+		assert.ok(response.headers.get('Content-Security-Policy')?.includes(endpoint));
+	}
+});
+
+test('CSP ignores invalid, credentialed, private and insecure production voice URLs', () => {
+	for (const endpoint of [
+		'wss://; script-src *',
+		'wss://user:password@voice.example.com/ws',
+		'ws://voice.example.com/ws',
+		'wss://127.0.0.1:8080/ws',
+		'https://voice.example.com/ws'
+	]) {
+		const response = addSecurityHeaders(new Response('ok'), target, {
+			MUMBLE_PROXY_WS_URL: endpoint
+		});
+		const policy = response.headers.get('Content-Security-Policy') ?? '';
+		assert.doesNotMatch(policy, /connect-src[^;]*wss?:/u);
+		assert.equal(policy.split('script-src').length, 2);
+		assert.ok(!policy.includes('password'));
+	}
 });

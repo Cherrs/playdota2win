@@ -44,6 +44,35 @@ test.after(async () => {
 	await vite.close();
 });
 
+test('applies the runtime voice CSP to page, rejected admin and error responses', async () => {
+	const configuredEnv = { ...env, MUMBLE_PROXY_WS_URL: 'wss://relay.example.net/ws' };
+	const requests = [
+		new Request('https://example.com/download'),
+		new Request('https://example.com/api/admin', {
+			method: 'POST',
+			headers: { Origin: 'https://other.example.net' }
+		})
+	];
+	for (const request of requests) {
+		const response = await worker.fetch(request, configuredEnv, executionContext);
+		assert.ok(response.headers.get('Content-Security-Policy')?.includes('wss://relay.example.net'));
+	}
+	const response = await worker.fetch(
+		requests[0],
+		{
+			...configuredEnv,
+			ASSETS: {
+				fetch: async () => {
+					throw new Error('fixture asset failure');
+				}
+			} as unknown as Fetcher
+		},
+		executionContext
+	);
+	assert.equal(response.status, 500);
+	assert.ok(response.headers.get('Content-Security-Policy')?.includes('wss://relay.example.net'));
+});
+
 const endpoints = [
 	['/api/admin', 'GET, POST, PUT, DELETE, HEAD'],
 	['/api/admin/announcements', 'GET, POST, PUT, DELETE, HEAD'],
@@ -79,7 +108,7 @@ test('all 20 endpoint paths expose the same 35 explicit methods plus HEAD fallba
 
 	for (const [path, allow] of endpoints) {
 		const response = await worker.fetch(
-			new Request(`https://playdota2.win${path}`, { method: 'PATCH' }),
+			new Request(`https://example.com${path}`, { method: 'PATCH' }),
 			env,
 			executionContext
 		);
@@ -95,7 +124,7 @@ test('rest endpoints still match an empty path parameter', async () => {
 		['/api/downloads/relay', 'GET, HEAD']
 	] as const) {
 		const response = await worker.fetch(
-			new Request(`https://playdota2.win${path}`, { method: 'PATCH' }),
+			new Request(`https://example.com${path}`, { method: 'PATCH' }),
 			env,
 			executionContext
 		);
@@ -106,7 +135,7 @@ test('rest endpoints still match an empty path parameter', async () => {
 
 test('entrypoint supplies HEAD, explicit OPTIONS, API 404 and asset fallback behavior', async () => {
 	const head = await worker.fetch(
-		new Request('https://playdota2.win/api/gettime', { method: 'HEAD' }),
+		new Request('https://example.com/api/gettime', { method: 'HEAD' }),
 		env,
 		executionContext
 	);
@@ -115,7 +144,7 @@ test('entrypoint supplies HEAD, explicit OPTIONS, API 404 and asset fallback beh
 	assert.match(head.headers.get('Content-Type') ?? '', /^application\/json/u);
 
 	const options = await worker.fetch(
-		new Request('https://playdota2.win/api/rustdesk', { method: 'OPTIONS' }),
+		new Request('https://example.com/api/rustdesk', { method: 'OPTIONS' }),
 		env,
 		executionContext
 	);
@@ -123,7 +152,7 @@ test('entrypoint supplies HEAD, explicit OPTIONS, API 404 and asset fallback beh
 	assert.equal(options.headers.get('Access-Control-Allow-Origin'), '*');
 
 	const missing = await worker.fetch(
-		new Request('https://playdota2.win/api/not-found'),
+		new Request('https://example.com/api/not-found'),
 		env,
 		executionContext
 	);
@@ -132,11 +161,7 @@ test('entrypoint supplies HEAD, explicit OPTIONS, API 404 and asset fallback beh
 		success: false,
 		error: 'API endpoint not found'
 	});
-	const apiRoot = await worker.fetch(
-		new Request('https://playdota2.win/api'),
-		env,
-		executionContext
-	);
+	const apiRoot = await worker.fetch(new Request('https://example.com/api'), env, executionContext);
 	assert.equal(apiRoot.status, 404);
 	assert.deepEqual(await apiRoot.json(), {
 		success: false,
@@ -144,7 +169,7 @@ test('entrypoint supplies HEAD, explicit OPTIONS, API 404 and asset fallback beh
 	});
 
 	const asset = await worker.fetch(
-		new Request('https://playdota2.win/download'),
+		new Request('https://example.com/download'),
 		env,
 		executionContext
 	);
@@ -159,7 +184,7 @@ test('entrypoint supplies HEAD, explicit OPTIONS, API 404 and asset fallback beh
 
 test('cross-origin admin mutations are rejected before routing with security headers', async () => {
 	const response = await worker.fetch(
-		new Request('https://playdota2.win/api/admin', {
+		new Request('https://example.com/api/admin', {
 			method: 'POST',
 			headers: { Origin: 'https://attacker.example' }
 		}),

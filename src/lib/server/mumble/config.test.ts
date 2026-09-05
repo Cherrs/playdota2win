@@ -5,25 +5,25 @@ import type { RuntimePlatform } from '../../runtime.ts';
 import { getMumbleProxyConfig, getMumbleProxyHealthUrl } from './config.ts';
 
 test('derives proxy endpoints from the request URL when env vars are missing', async () => {
-	const requestUrl = new URL('http://playdota2.win/download');
+	const requestUrl = new URL('http://example.com/download');
 
 	assert.deepEqual(await getMumbleProxyConfig(undefined, requestUrl), {
-		wsUrl: 'ws://playdota2.win:8080/ws',
+		wsUrl: 'ws://example.com:8080/ws',
 		iceServers: [],
-		healthUrl: 'http://playdota2.win:8080/health'
+		healthUrl: 'http://example.com:8080/health'
 	});
-	assert.equal(getMumbleProxyHealthUrl(undefined, requestUrl), 'http://playdota2.win:8080/health');
+	assert.equal(getMumbleProxyHealthUrl(undefined, requestUrl), 'http://example.com:8080/health');
 });
 
 test('uses secure proxy endpoints for https request URLs', async () => {
-	const requestUrl = new URL('https://playdota2.win/admin');
+	const requestUrl = new URL('https://example.com/admin');
 
 	assert.deepEqual(await getMumbleProxyConfig(undefined, requestUrl), {
-		wsUrl: 'wss://playdota2.win:8080/ws',
+		wsUrl: 'wss://example.com:8080/ws',
 		iceServers: [],
-		healthUrl: 'https://playdota2.win:8080/health'
+		healthUrl: 'https://example.com:8080/health'
 	});
-	assert.equal(getMumbleProxyHealthUrl(undefined, requestUrl), 'https://playdota2.win:8080/health');
+	assert.equal(getMumbleProxyHealthUrl(undefined, requestUrl), 'https://example.com:8080/health');
 });
 
 test('never publishes legacy TURN credentials or third-party ICE servers', async () => {
@@ -35,14 +35,14 @@ test('never publishes legacy TURN credentials or third-party ICE servers', async
 			MUMBLE_PROXY_TURN_CREDENTIAL: 'legacy-secret'
 		}
 	} as RuntimePlatform;
-	const config = await getMumbleProxyConfig(platform, new URL('https://playdota2.win'));
+	const config = await getMumbleProxyConfig(platform, new URL('https://example.com'));
 	assert.deepEqual(config?.iceServers, []);
 	assert.ok(!JSON.stringify(config).includes('legacy-secret'));
 	assert.equal(config?.wsUrl, 'wss://voice.example.com/ws');
 });
 
 test('rejects loopback proxy endpoints for public browser requests', async () => {
-	const requestUrl = new URL('https://playdota2.win/download');
+	const requestUrl = new URL('https://example.com/download');
 	const platform = {
 		env: {
 			MUMBLE_PROXY_WS_URL: 'ws://127.0.0.1:8080/ws',

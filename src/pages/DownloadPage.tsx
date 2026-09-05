@@ -490,7 +490,7 @@ export default function DownloadPage() {
 
 					<footer className={styles.footer}>
 						<p>Windows 10+</p>
-						<p className={styles['footer-love']}>playdota2.win</p>
+						<p className={styles['footer-love']}>PlayDota2Win</p>
 					</footer>
 				</main>
 			</div>

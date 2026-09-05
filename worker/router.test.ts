@@ -43,7 +43,7 @@ test('adapter forwards request, params, platform, fetch and response cookies', a
 			}
 		})
 	];
-	const request = new Request('https://playdota2.win/api/files/maps%2Ftest.zip');
+	const request = new Request('https://example.com/api/files/maps%2Ftest.zip');
 	const cf = { colo: 'HKG' } as CfProperties;
 	Object.defineProperty(request, 'cf', { value: cf });
 	const response = await runApiHandler(
@@ -77,7 +77,7 @@ test('GET supplies HEAD while preserving headers and omitting the response body'
 			}
 		})
 	];
-	const request = new Request('https://playdota2.win/api/probe', { method: 'HEAD' });
+	const request = new Request('https://example.com/api/probe', { method: 'HEAD' });
 	const response = await runApiHandler(
 		request,
 		env,
@@ -99,7 +99,7 @@ test('explicit HEAD handlers take precedence over GET', async () => {
 			HEAD: () => new Response(null, { status: 204, headers: { 'X-Handler': 'head' } })
 		})
 	];
-	const request = new Request('https://playdota2.win/api/probe', { method: 'HEAD' });
+	const request = new Request('https://example.com/api/probe', { method: 'HEAD' });
 	const response = await runApiHandler(
 		request,
 		env,
@@ -120,7 +120,7 @@ test('405 includes the complete established Allow contract', async () => {
 	};
 	assert.deepEqual(allowedMethods(handlers), ['GET', 'POST', 'OPTIONS', 'HEAD']);
 
-	const request = new Request('https://playdota2.win/api/probe', { method: 'PATCH' });
+	const request = new Request('https://example.com/api/probe', { method: 'PATCH' });
 	const response = await runApiHandler(request, env, executionContext, new URL(request.url), [
 		exact('/api/probe', handlers)
 	]);
@@ -132,7 +132,7 @@ test('405 includes the complete established Allow contract', async () => {
 
 test('known trailing-slash routes normalize and unknown routes remain 404', async () => {
 	const routes = [exact('/api/probe', { GET: () => new Response('ok') })];
-	const trailingRequest = new Request('https://playdota2.win/api/probe/?page=2');
+	const trailingRequest = new Request('https://example.com/api/probe/?page=2');
 	const redirect = await runApiHandler(
 		trailingRequest,
 		env,
@@ -143,7 +143,7 @@ test('known trailing-slash routes normalize and unknown routes remain 404', asyn
 	assert.equal(redirect.status, 308);
 	assert.equal(redirect.headers.get('Location'), '/api/probe?page=2');
 
-	const missingRequest = new Request('https://playdota2.win/api/missing/');
+	const missingRequest = new Request('https://example.com/api/missing/');
 	const missing = await runApiHandler(
 		missingRequest,
 		env,

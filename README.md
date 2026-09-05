@@ -79,6 +79,33 @@ will fail closed after three errors.
 RustDesk clients can call the public `GET /api/rustdesk` endpoint without authorization. The
 endpoint returns `404` until an enabled download item is configured as its RustDesk data source.
 
+## Deployment addresses
+
+Production hostnames are deliberately absent from the repository. Configure the following in
+Cloudflare Workers **Settings → Variables and Secrets**, or use `npx wrangler secret put <NAME>`:
+
+| Name                        | Example                           | Purpose                                                                                      |
+| --------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------- |
+| `MUMBLE_PROXY_WS_URL`       | `wss://voice.example.com/ws`      | Browser-to-MumDota signaling; also supplies the exact WebSocket origin in CSP.               |
+| `MUMBLE_PROXY_HEALTH_URL`   | `https://voice.example.com/ready` | Upstream readiness probe.                                                                    |
+| `PRIMARY_DOWNLOAD_HOSTNAME` | `downloads.example.com`           | Hostname only, without scheme or port; allows probing newer filenames on this download host. |
+
+Before the first deployment of this cleanup, verify both voice variables already exist remotely
+and add `PRIMARY_DOWNLOAD_HOSTNAME` using the existing primary download host. `keep_vars: true`
+preserves dashboard variables. If the download hostname is unset, official release/R2 updates
+still work, but the updater does not probe or rewrite original download links.
+
+Manage the site's Custom Domain in **Settings → Domains & Routes**. The Wrangler configuration
+omits `route`/`routes` and sets `workers_dev: false`, following Cloudflare's
+[dashboard-managed routing guidance](https://developers.cloudflare.com/workers/wrangler/configuration/#source-of-truth).
+Keep the existing domain binding there; new installations must add their own before deployment.
+Do not put production domains back in the Wrangler file or generated type declarations.
+
+For local development, put private values in ignored `.dev.vars` or `.env` files. MumDota's
+private upstream, TURN hosts and origin allowlist belong in Kubernetes configuration or an
+ignored local manifest, not the public examples. Runtime addresses remain visible to connected
+browsers; removing repository references does not erase Git history or hide network endpoints.
+
 ## Production deployment gate
 
 Do not deploy this version until all of the following are complete, in this order:
@@ -86,7 +113,7 @@ Do not deploy this version until all of the following are complete, in this orde
 1. Enter the metadata maintenance window, run the remote migration preview and apply command, and
    verify the post-write SHA-256 for all three canonical R2 objects.
 2. Confirm the `UPLOADS_BUCKET` R2 binding, every required secret, and the dashboard-managed
-   `TURNSTILE_SITE_KEY`. The Turnstile widget hostname allowlist must include `playdota2.win` (and
+   `TURNSTILE_SITE_KEY`. The Turnstile widget hostname allowlist must include your production hostname (and
    each explicitly supported preview hostname).
 3. Apply and list the prefix-scoped R2 lifecycle rules documented below.
 4. Deploy, then smoke-test `/`, `/download`, and `/admin`. On both password flows, confirm that the
@@ -147,8 +174,8 @@ refreshes them before expiry and performs ICE restart. Credentials are never sto
 bindings or browser storage. Remove the obsolete `MUMBLE_PROXY_STUN_SERVERS`,
 `MUMBLE_PROXY_TURN_USERNAME` and `MUMBLE_PROXY_TURN_CREDENTIAL` bindings from the deployment.
 
-Configure `MUMBLE_PROXY_WS_URL=wss://voice.playdota2.win/ws` and
-`MUMBLE_PROXY_HEALTH_URL=https://voice.playdota2.win/ready`. The latter checks upstream TCP readiness;
+Configure `MUMBLE_PROXY_WS_URL=wss://voice.example.com/ws` and
+`MUMBLE_PROXY_HEALTH_URL=https://voice.example.com/ready`. The latter checks upstream TCP readiness;
 it does not prove that voice works. `/health` remains available as process liveness.
 
 Deploy this frontend together with the corresponding MumDota protocol-v2 update. Cached old clients

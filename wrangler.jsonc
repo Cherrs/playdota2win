@@ -9,6 +9,8 @@
 	"compatibility_date": "2026-07-13",
 	"compatibility_flags": ["nodejs_als", "nodejs_compat", "global_fetch_strictly_public"],
 	"keep_vars": true,
+	// Manage domains/routes in the Cloudflare dashboard; keep deployment hosts out of Git.
+	"workers_dev": false,
 	"minify": true,
 	"assets": {
 		"binding": "ASSETS",
@@ -50,20 +52,10 @@
 			"bucket_name": "downloads",
 			"remote": true
 		}
-	],
-	"vars": {
-		// Public Turnstile site key stays managed as a dashboard variable; keep_vars prevents
-		// Wrangler deployments from deleting it. Secrets remain managed with `wrangler secret`.
-		"MUMBLE_PROXY_WS_URL": "wss://voice.playdota2.win/ws",
-		"MUMBLE_PROXY_HEALTH_URL": "https://voice.playdota2.win/ready"
-	},
-	"routes": [
-		{
-			"pattern": "playdota2.win",
-			"zone_name": "playdota2.win",
-			"custom_domain": true
-		}
 	]
+	// TURNSTILE_SITE_KEY, MUMBLE_PROXY_WS_URL, MUMBLE_PROXY_HEALTH_URL and
+	// PRIMARY_DOWNLOAD_HOSTNAME are managed in the dashboard (or as Worker secrets).
+	// keep_vars preserves dashboard variables. Do not add route/routes keys here.
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

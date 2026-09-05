@@ -5,6 +5,9 @@ interface Env {
 	TURNSTILE_SECRET_KEY?: string;
 	TURNSTILE_SITE_KEY?: string;
 	DOWNLOAD_PASSWORD?: string;
+	MUMBLE_PROXY_WS_URL?: string;
+	MUMBLE_PROXY_HEALTH_URL?: string;
+	PRIMARY_DOWNLOAD_HOSTNAME?: string;
 	MUMBLE_PROXY_TURN_USERNAME?: string;
 	MUMBLE_PROXY_TURN_CREDENTIAL?: string;
 }
@@ -17,6 +20,9 @@ declare namespace Cloudflare {
 		TURNSTILE_SECRET_KEY?: string;
 		TURNSTILE_SITE_KEY?: string;
 		DOWNLOAD_PASSWORD?: string;
+		MUMBLE_PROXY_WS_URL?: string;
+		MUMBLE_PROXY_HEALTH_URL?: string;
+		PRIMARY_DOWNLOAD_HOSTNAME?: string;
 		MUMBLE_PROXY_TURN_USERNAME?: string;
 		MUMBLE_PROXY_TURN_CREDENTIAL?: string;
 	}

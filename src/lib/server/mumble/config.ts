@@ -74,22 +74,28 @@ function deriveProxyUrl(requestUrl: URL | undefined, kind: 'ws' | 'health'): str
 	return url.toString();
 }
 
+export function getMumbleProxyWsUrl(
+	platform: RuntimePlatform | undefined,
+	requestUrl?: URL
+): string | null {
+	const wsUrl =
+		normalizeUrl(platform?.env?.MUMBLE_PROXY_WS_URL) ?? deriveProxyUrl(requestUrl, 'ws');
+	return wsUrl && isBrowserReachableUrl(wsUrl, requestUrl) ? wsUrl : null;
+}
+
 export async function getMumbleProxyConfig(
 	platform: RuntimePlatform | undefined,
 	requestUrl?: URL
 ): Promise<MumbleProxyConfig | null> {
-	const wsUrl = normalizeUrl(platform?.env?.MUMBLE_PROXY_WS_URL);
-	if (wsUrl && !isBrowserReachableUrl(wsUrl, requestUrl)) {
-		return null;
-	}
-	if (!wsUrl && !requestUrl) {
+	const wsUrl = getMumbleProxyWsUrl(platform, requestUrl);
+	if (!wsUrl) {
 		return null;
 	}
 
 	const healthUrl = normalizeUrl(platform?.env?.MUMBLE_PROXY_HEALTH_URL);
 
 	return {
-		wsUrl: wsUrl ?? deriveProxyUrl(requestUrl, 'ws')!,
+		wsUrl,
 		// Session-scoped ICE credentials arrive directly from MumDota over WSS.
 		iceServers: [],
 		healthUrl:

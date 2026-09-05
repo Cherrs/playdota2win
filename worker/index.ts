@@ -53,7 +53,7 @@ async function handleRequest(
 ): Promise<Response> {
 	const url = new URL(request.url);
 	const crossOriginRejection = rejectCrossOriginAdminMutation(request, url);
-	if (crossOriginRejection) return addSecurityHeaders(crossOriginRejection, url);
+	if (crossOriginRejection) return addSecurityHeaders(crossOriginRejection, url, env);
 
 	try {
 		const isApiRequest = url.pathname === '/api' || url.pathname.startsWith('/api/');
@@ -63,7 +63,7 @@ async function handleRequest(
 		if (!isApiRequest && shouldPrerenderPublicShell(request, url, response)) {
 			response = prerenderPublicShell(response);
 		}
-		return addSecurityHeaders(response, url);
+		return addSecurityHeaders(response, url, env);
 	} catch (error) {
 		console.error({
 			component: 'worker_router',
@@ -73,7 +73,8 @@ async function handleRequest(
 		});
 		return addSecurityHeaders(
 			json({ success: false, error: 'Internal server error' }, { status: 500 }),
-			url
+			url,
+			env
 		);
 	}
 }

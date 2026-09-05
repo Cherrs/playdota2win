@@ -23,7 +23,12 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	}
 
 	try {
-		const summary = await updateManagedSoftware({ kv, r2, fetchImpl: fetch });
+		const summary = await updateManagedSoftware({
+			kv,
+			r2,
+			fetchImpl: fetch,
+			primaryDownloadHostname: platform?.env?.PRIMARY_DOWNLOAD_HOSTNAME
+		});
 		return json({ success: true, data: summary } satisfies ApiResponse<SoftwareUpdateSummary>);
 	} catch (error) {
 		const conflict = error instanceof DownloadListConflictError;

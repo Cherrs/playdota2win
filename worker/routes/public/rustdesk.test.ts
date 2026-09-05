@@ -75,7 +75,7 @@ function createBucket(item: DownloadItem, state: R2BackupState): R2Bucket {
 }
 
 async function getConfig(item: DownloadItem, state: R2BackupState) {
-	const request = new Request('https://playdota2.win/api/rustdesk');
+	const request = new Request('https://example.com/api/rustdesk');
 	const response = await getRustDeskConfig({
 		request,
 		url: new URL(request.url),
@@ -111,7 +111,7 @@ test('RustDesk API uses a strictly newer R2 release and reports its filename ver
 	assert.equal(body.version, '1.5.0');
 	assert.match(
 		String(body.downloadUrl),
-		/^https:\/\/playdota2\.win\/api\/downloads\/relay\/mirrors\/rustdesk\/release-1\.5\.0\?/u
+		/^https:\/\/example\.com\/api\/downloads\/relay\/mirrors\/rustdesk\/release-1\.5\.0\?/u
 	);
 	assert.match(String(body.downloadUrl), /filename=rustdesk-1.5.0-x86_64.exe/u);
 });

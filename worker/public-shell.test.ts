@@ -17,24 +17,24 @@ test('prerenders only GET responses for public HTML routes', () => {
 
 	assert.equal(
 		shouldPrerenderPublicShell(
-			new Request('https://playdota2.win/download'),
-			new URL('https://playdota2.win/download'),
+			new Request('https://example.com/download'),
+			new URL('https://example.com/download'),
 			html
 		),
 		true
 	);
 	assert.equal(
 		shouldPrerenderPublicShell(
-			new Request('https://playdota2.win/admin'),
-			new URL('https://playdota2.win/admin'),
+			new Request('https://example.com/admin'),
+			new URL('https://example.com/admin'),
 			html
 		),
 		false
 	);
 	assert.equal(
 		shouldPrerenderPublicShell(
-			new Request('https://playdota2.win/', { method: 'HEAD' }),
-			new URL('https://playdota2.win/'),
+			new Request('https://example.com/', { method: 'HEAD' }),
+			new URL('https://example.com/'),
 			html
 		),
 		false

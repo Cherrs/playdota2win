@@ -43,7 +43,7 @@ test('response cookies preserve logout expiry and existing response headers', ()
 });
 
 test('security headers retain CSP and admin no-store behavior', () => {
-	const url = new URL('https://playdota2.win/admin');
+	const url = new URL('https://example.com/admin');
 	const response = addSecurityHeaders(new Response('ok'), url);
 
 	assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');

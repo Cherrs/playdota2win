@@ -179,19 +179,35 @@ test('builds a same-directory versioned URL only for the primary download host',
 	assert.equal(
 		buildVersionedPrimaryDownloadUrl(
 			downloadItem({
-				url: 'https://d.playdota2.win:8081/tools/mumble_client-1.5.901.x64.exe'
+				url: 'https://d.example.com:8081/tools/mumble_client-1.5.901.x64.exe'
 			}),
-			release
+			release,
+			' D.Example.Com '
 		),
-		'https://d.playdota2.win:8081/tools/mumble_client-1.5.915.x64.exe'
+		'https://d.example.com:8081/tools/mumble_client-1.5.915.x64.exe'
 	);
 	assert.equal(
 		buildVersionedPrimaryDownloadUrl(
 			downloadItem({ url: 'https://downloads.example.com/mumble_client-1.5.901.x64.exe' }),
-			release
+			release,
+			'd.example.com'
 		),
 		undefined
 	);
+	for (const url of [
+		'https://d.example.com/mumble_client-1.5.901.x64.exe',
+		'https://d.example.com.attacker.example/mumble_client-1.5.901.x64.exe',
+		'https://user:password@d.example.com/mumble_client-1.5.901.x64.exe',
+		'ftp://d.example.com/mumble_client-1.5.901.x64.exe'
+	]) {
+		assert.equal(buildVersionedPrimaryDownloadUrl(downloadItem({ url }), release), undefined);
+		if (!url.startsWith('https://d.example.com/')) {
+			assert.equal(
+				buildVersionedPrimaryDownloadUrl(downloadItem({ url }), release, 'd.example.com'),
+				undefined
+			);
+		}
+	}
 });
 
 test('matches only the official RustDesk API item and excludes the monkey installer', () => {
@@ -221,7 +237,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 		filename: 'mumble_client-1.5.901.x64.exe',
 		version: '1.5.901',
 		size: '47.0MB',
-		url: 'https://d.playdota2.win:8081/mumble_client-1.5.901.x64.exe'
+		url: 'https://d.example.com:8081/mumble_client-1.5.901.x64.exe'
 	});
 	const rustdesk = downloadItem({
 		id: 'rustdesk',
@@ -229,7 +245,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 		filename: 'rustdesk-1.4.9-x86_64.exe',
 		version: '1.4.8',
 		size: '20.0MB',
-		url: 'https://d.playdota2.win:8081/rustdesk-1.4.9-x86_64.exe',
+		url: 'https://d.example.com:8081/rustdesk-1.4.9-x86_64.exe',
 		rustdeskConfig: { enabled: true, idServer: 'id.example.com', key: 'key' }
 	});
 	const monkey = downloadItem({
@@ -267,7 +283,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 			return Response.json(releasePayload('rustdesk', '1.4.9', rustDeskSize));
 		}
 		if (
-			url === 'https://d.playdota2.win:8081/mumble_client-1.5.915.x64.exe' &&
+			url === 'https://d.example.com:8081/mumble_client-1.5.915.x64.exe' &&
 			init?.method === 'HEAD'
 		) {
 			primaryOriginChecks += 1;
@@ -285,6 +301,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 
 	const first = await updateManagedSoftware({
 		kv: undefined,
+		primaryDownloadHostname: 'd.example.com',
 		r2: bucket as unknown as R2Bucket,
 		fetchImpl,
 		backupLogger: quietLogger,
@@ -311,7 +328,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 		stored.items.find((item) => item.id === 'mumble'),
 		{
 			...mumble,
-			url: 'https://d.playdota2.win:8081/mumble_client-1.5.915.x64.exe',
+			url: 'https://d.example.com:8081/mumble_client-1.5.915.x64.exe',
 			filename: 'mumble_client-1.5.915.x64.exe',
 			version: '1.5.915',
 			size: '2.0MB',
@@ -341,6 +358,7 @@ test('updates R2 and metadata while keeping equal versions on the original link'
 	assetDownloads.length = 0;
 	const second = await updateManagedSoftware({
 		kv: undefined,
+		primaryDownloadHostname: 'd.example.com',
 		r2: bucket as unknown as R2Bucket,
 		fetchImpl,
 		backupLogger: quietLogger,

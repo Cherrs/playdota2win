@@ -15,19 +15,19 @@ test('accepts Turnstile only for the expected action, flow and hostname', () => 
 		success: true,
 		action: TURNSTILE_ACTION,
 		cdata: 'admin-auth',
-		hostname: 'playdota2.win'
+		hostname: 'example.com'
 	};
-	assert.equal(isExpectedTurnstileResult(valid, 'admin-auth', 'playdota2.win'), true);
-	assert.equal(isExpectedTurnstileResult(valid, 'download-auth', 'playdota2.win'), false);
+	assert.equal(isExpectedTurnstileResult(valid, 'admin-auth', 'example.com'), true);
+	assert.equal(isExpectedTurnstileResult(valid, 'download-auth', 'example.com'), false);
 	assert.equal(isExpectedTurnstileResult(valid, 'admin-auth', 'evil.example.com'), false);
 	assert.equal(
-		isExpectedTurnstileResult({ ...valid, action: 'other' }, 'admin-auth', 'playdota2.win'),
+		isExpectedTurnstileResult({ ...valid, action: 'other' }, 'admin-auth', 'example.com'),
 		false
 	);
 });
 
 test('does not trust X-Forwarded-For on public requests', () => {
-	const publicRequest = new Request('https://playdota2.win/api/admin/auth', {
+	const publicRequest = new Request('https://example.com/api/admin/auth', {
 		headers: { 'X-Forwarded-For': '203.0.113.10' }
 	});
 	const localRequest = new Request('http://localhost/api/admin/auth', {
