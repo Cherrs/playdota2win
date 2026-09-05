@@ -276,6 +276,11 @@ export interface MumbleProxyConfig {
 	healthUrl: string | null;
 }
 
+export interface MumbleIceConfig {
+	ice_servers: IceServer[];
+	expires_at: number | null;
+}
+
 /**
  * Mumble 代理健康检查结果
  */
@@ -351,6 +356,8 @@ export type MumbleProxyClientEvent =
 	| { type: 'connect'; data: { username: string } }
 	| { type: 'disconnect' }
 	| { type: 'offer'; data: { sdp: string } }
+	| { type: 'answer'; data: { sdp: string } }
+	| { type: 'start_voice' | 'ice_restart' | 'ice_refresh' }
 	| {
 			type: 'ice_candidate';
 			data: { candidate: string; sdp_mid: string | null; sdp_mline_index: number | null };
@@ -367,12 +374,16 @@ export type MumbleProxyServerEvent =
 	| {
 			type: 'connected';
 			data: {
+				protocol_version?: number;
+				ice?: MumbleIceConfig;
 				session_id: number;
 				channels: MumbleProxyChannelPayload[];
 				users: MumbleProxyUserPayload[];
 			};
 	  }
 	| { type: 'answer'; data: { sdp: string } }
+	| { type: 'offer'; data: { sdp: string } }
+	| { type: 'ice_config'; data: MumbleIceConfig }
 	| {
 			type: 'ice_candidate';
 			data: { candidate: string; sdp_mid: string | null; sdp_mline_index: number | null };

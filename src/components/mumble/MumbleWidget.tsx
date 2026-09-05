@@ -465,249 +465,272 @@ export default function MumbleWidget() {
 						</div>
 					</header>
 
-					<div className={classNames('nickname-row')}>
-						{editingNickname ? (
-							<>
-								<input
-									type="text"
-									className={classNames('nickname-input')}
-									maxLength={MAX_NICKNAME_LENGTH}
-									value={nicknameDraft}
-									onChange={(event) => setNicknameDraft(event.currentTarget.value)}
-									aria-label="Mumble 昵称"
-									onKeyDown={(event) => {
-										if (event.key === 'Enter' && !event.nativeEvent.isComposing) saveNickname();
-									}}
-								/>
-								<button className={classNames('small-btn')} type="button" onClick={saveNickname}>
-									保存
-								</button>
-								<button
-									className={classNames('small-btn', 'ghost')}
-									type="button"
-									onClick={() => {
-										setNicknameDraft(nicknameRef.current);
-										setEditingNickname(false);
-									}}
-								>
-									取消
-								</button>
-							</>
-						) : (
-							<>
-								<span className={classNames('nickname-prefix')}>昵称：</span>
-								<strong className={classNames('nickname-label')}>{nickname || '准备中'}</strong>
-								<button
-									className={classNames('small-btn', 'ghost', 'icon-only')}
-									type="button"
-									onClick={randomizeNickname}
-									title="随机昵称"
-									aria-label="生成随机昵称"
-								>
-									<ShuffleIcon />
-								</button>
-								<button
-									className={classNames('small-btn', 'ghost')}
-									type="button"
-									onClick={startNicknameEdit}
-								>
-									改名
-								</button>
-							</>
-						)}
-					</div>
-
-					<div className={classNames('status-card')}>
-						<button
-							className={classNames('card-header')}
-							type="button"
-							onClick={() => setStatusCollapsed((collapsed) => !collapsed)}
-							aria-expanded={!statusCollapsed}
-							aria-controls={statusBodyId}
-						>
-							<span
-								className={classNames(
-									'status-dot',
-									clientState.connected && 'active',
-									clientState.voiceFailed && 'failed'
-								)}
-								aria-hidden="true"
-							/>
-							<span className={classNames('card-header-title')}>连接信息</span>
-							<span
-								className={classNames('collapse-arrow', statusCollapsed && 'collapsed')}
-								aria-hidden="true"
-							>
-								▾
-							</span>
-						</button>
-						{!statusCollapsed && (
-							<div className={classNames('card-body')} id={statusBodyId}>
-								<div className={classNames('status-main')} role="status" aria-live="polite">
-									<span>{statusText}</span>
-								</div>
-								{clientState.errorMessage && (
-									<p className={classNames('status-error')} role="alert">
-										{clientState.errorMessage}
-									</p>
-								)}
-							</div>
-						)}
-					</div>
-
-					<div className={classNames('channel-card')}>
-						<button
-							className={classNames('card-header')}
-							type="button"
-							onClick={() => setChannelCollapsed((collapsed) => !collapsed)}
-							aria-expanded={!channelCollapsed}
-							aria-controls={channelBodyId}
-						>
-							<span className={classNames('card-header-title')}>当前频道</span>
-							{channelCollapsed && (
-								<span className={classNames('channel-name-pill')}>
-									{channelOptions.find((option) => option.id === clientState.currentChannelId)
-										?.label ?? '—'}
-								</span>
-							)}
-							<span
-								className={classNames('collapse-arrow', channelCollapsed && 'collapsed')}
-								aria-hidden="true"
-							>
-								▾
-							</span>
-						</button>
-						{!channelCollapsed && (
-							<div className={classNames('card-body')} id={channelBodyId}>
-								<select
-									id="mumble-channel-select"
-									className={classNames('channel-select')}
-									aria-label="选择 Mumble 频道"
-									value={clientState.currentChannelId ?? ''}
-									disabled={!clientState.connected || channelOptions.length === 0}
-									onChange={(event) => {
-										const value = Number(event.currentTarget.value);
-										if (!Number.isNaN(value)) clientRef.current?.switchChannel(value);
-									}}
-								>
-									{channelOptions.length === 0 ? (
-										<option value="">等待频道列表...</option>
-									) : (
-										channelOptions.map((option) => (
-											<option key={option.id} value={option.id}>
-												{option.label}
-											</option>
-										))
-									)}
-								</select>
-
-								<div className={classNames('user-chips')}>
-									{currentChannelUsers.filter((user) => user.sessionId === clientState.sessionId)
-										.length === 0 ? (
-										<span className={classNames('hint-chip')}>当前频道暂无成员</span>
-									) : (
-										currentChannelUsers
-											.filter((user) => user.sessionId === clientState.sessionId)
-											.map((user) => (
-												<span
-													className={classNames('user-chip', 'self')}
-													key={`${user.sessionId}-${user.name}`}
-												>
-													{user.name}
-												</span>
-											))
-									)}
-								</div>
-							</div>
-						)}
-					</div>
-
-					<section className={classNames('members-section')} aria-label="当前频道成员">
-						<h3>
-							成员 <span>({currentChannelUsers.length})</span>
-						</h3>
-						<div className={classNames('member-list')}>
-							{currentChannelUsers.length === 0 ? (
-								<p className={classNames('members-empty')}>等待成员加入频道</p>
-							) : (
-								currentChannelUsers.map((user) => (
-									<div className={classNames('member-row')} key={user.sessionId}>
-										<span className={classNames('member-dot')} aria-hidden="true" />
-										<span className={classNames('member-name')}>
-											{user.name}
-											{user.sessionId === clientState.sessionId ? ' (我)' : ''}
-										</span>
-										<span className={classNames('member-audio')}>
-											<SpeakerIcon />
-										</span>
-									</div>
-								))
-							)}
-						</div>
-					</section>
-
-					<div className={classNames('voice-controls')}>
-						<button
-							className={classNames('voice-btn', clientState.voiceConnected && 'active')}
-							type="button"
-							onClick={() => void clientRef.current?.ensureVoice()}
-							disabled={loadingConfig || Boolean(configError)}
-							aria-pressed={clientState.voiceConnected}
-						>
-							<SpeakerIcon />
-							{clientState.voiceConnected ? '语音已启用' : '启用语音'}
-						</button>
-						<button
-							className={classNames('voice-btn', 'ghost', clientState.muted && 'active')}
-							type="button"
-							onClick={() => clientRef.current?.setMuted(!clientState.muted)}
-							disabled={!clientState.connected}
-							aria-pressed={clientState.muted}
-						>
-							<MicrophoneIcon />
-							{clientState.muted ? '取消静音' : '麦克风静音'}
-						</button>
-						<button
-							className={classNames('voice-btn', 'ghost', clientState.deafened && 'active')}
-							type="button"
-							onClick={() => clientRef.current?.setDeafened(!clientState.deafened)}
-							disabled={!clientState.connected}
-							aria-pressed={clientState.deafened}
-						>
-							<ChatIcon />
-							{clientState.deafened ? '取消耳聋' : '仅听文字'}
-						</button>
-					</div>
-
-					{(clientState.audioPermission === 'denied' || clientState.playbackBlocked) && (
-						<div className={classNames('hint-card')}>
-							<p>
-								{clientState.audioPermission === 'denied'
-									? '浏览器阻止了麦克风访问，可以稍后手动重新授权。'
-									: '浏览器拦截了自动播放，点击下面按钮恢复远端声音。'}
-							</p>
-							<div className={classNames('hint-actions')}>
-								{clientState.audioPermission === 'denied' && (
-									<button
-										className={classNames('small-btn')}
-										type="button"
-										onClick={() => void clientRef.current?.ensureVoice()}
-									>
-										重新请求麦克风
+					<div className={classNames('session-controls')}>
+						<div className={classNames('nickname-row')}>
+							{editingNickname ? (
+								<>
+									<input
+										type="text"
+										className={classNames('nickname-input')}
+										maxLength={MAX_NICKNAME_LENGTH}
+										value={nicknameDraft}
+										onChange={(event) => setNicknameDraft(event.currentTarget.value)}
+										aria-label="Mumble 昵称"
+										onKeyDown={(event) => {
+											if (event.key === 'Enter' && !event.nativeEvent.isComposing) saveNickname();
+										}}
+									/>
+									<button className={classNames('small-btn')} type="button" onClick={saveNickname}>
+										保存
 									</button>
-								)}
-								{clientState.playbackBlocked && (
 									<button
 										className={classNames('small-btn', 'ghost')}
 										type="button"
-										onClick={() => void clientRef.current?.resumeAudioPlayback()}
+										onClick={() => {
+											setNicknameDraft(nicknameRef.current);
+											setEditingNickname(false);
+										}}
 									>
-										恢复声音播放
+										取消
 									</button>
+								</>
+							) : (
+								<>
+									<span className={classNames('nickname-prefix')}>昵称：</span>
+									<strong className={classNames('nickname-label')}>{nickname || '准备中'}</strong>
+									<button
+										className={classNames('small-btn', 'ghost', 'icon-only')}
+										type="button"
+										onClick={randomizeNickname}
+										title="随机昵称"
+										aria-label="生成随机昵称"
+									>
+										<ShuffleIcon />
+									</button>
+									<button
+										className={classNames('small-btn', 'ghost')}
+										type="button"
+										onClick={startNicknameEdit}
+									>
+										改名
+									</button>
+								</>
+							)}
+						</div>
+
+						<div className={classNames('status-card')}>
+							<button
+								className={classNames('card-header')}
+								type="button"
+								onClick={() => setStatusCollapsed((collapsed) => !collapsed)}
+								aria-expanded={!statusCollapsed}
+								aria-controls={statusBodyId}
+							>
+								<span
+									className={classNames(
+										'status-dot',
+										clientState.connected && 'active',
+										clientState.voiceFailed && 'failed'
+									)}
+									aria-hidden="true"
+								/>
+								<span className={classNames('card-header-title')}>连接信息</span>
+								<span
+									className={classNames('collapse-arrow', statusCollapsed && 'collapsed')}
+									aria-hidden="true"
+								>
+									▾
+								</span>
+							</button>
+							{!statusCollapsed && (
+								<div className={classNames('card-body')} id={statusBodyId}>
+									<div className={classNames('status-main')} role="status" aria-live="polite">
+										<span>{statusText}</span>
+									</div>
+									{clientState.errorMessage && (
+										<p className={classNames('status-error')} role="alert">
+											{clientState.errorMessage}
+										</p>
+									)}
+								</div>
+							)}
+						</div>
+
+						<div className={classNames('channel-card')}>
+							<button
+								className={classNames('card-header')}
+								type="button"
+								onClick={() => setChannelCollapsed((collapsed) => !collapsed)}
+								aria-expanded={!channelCollapsed}
+								aria-controls={channelBodyId}
+							>
+								<span className={classNames('card-header-title')}>当前频道</span>
+								{channelCollapsed && (
+									<span className={classNames('channel-name-pill')}>
+										{channelOptions.find((option) => option.id === clientState.currentChannelId)
+											?.label ?? '—'}
+									</span>
+								)}
+								<span
+									className={classNames('collapse-arrow', channelCollapsed && 'collapsed')}
+									aria-hidden="true"
+								>
+									▾
+								</span>
+							</button>
+							{!channelCollapsed && (
+								<div className={classNames('card-body')} id={channelBodyId}>
+									<select
+										id="mumble-channel-select"
+										className={classNames('channel-select')}
+										aria-label="选择 Mumble 频道"
+										value={clientState.currentChannelId ?? ''}
+										disabled={!clientState.connected || channelOptions.length === 0}
+										onChange={(event) => {
+											const value = Number(event.currentTarget.value);
+											if (!Number.isNaN(value)) clientRef.current?.switchChannel(value);
+										}}
+									>
+										{channelOptions.length === 0 ? (
+											<option value="">等待频道列表...</option>
+										) : (
+											channelOptions.map((option) => (
+												<option key={option.id} value={option.id}>
+													{option.label}
+												</option>
+											))
+										)}
+									</select>
+
+									<div className={classNames('user-chips')}>
+										{currentChannelUsers.filter((user) => user.sessionId === clientState.sessionId)
+											.length === 0 ? (
+											<span className={classNames('hint-chip')}>当前频道暂无成员</span>
+										) : (
+											currentChannelUsers
+												.filter((user) => user.sessionId === clientState.sessionId)
+												.map((user) => (
+													<span
+														className={classNames('user-chip', 'self')}
+														key={`${user.sessionId}-${user.name}`}
+													>
+														{user.name}
+													</span>
+												))
+										)}
+									</div>
+								</div>
+							)}
+						</div>
+
+						<section className={classNames('members-section')} aria-label="当前频道成员">
+							<h3>
+								成员 <span>({currentChannelUsers.length})</span>
+							</h3>
+							<div className={classNames('member-list')}>
+								{currentChannelUsers.length === 0 ? (
+									<p className={classNames('members-empty')}>等待成员加入频道</p>
+								) : (
+									currentChannelUsers.map((user) => (
+										<div className={classNames('member-row')} key={user.sessionId}>
+											<span className={classNames('member-dot')} aria-hidden="true" />
+											<span className={classNames('member-name')}>
+												{user.name}
+												{user.sessionId === clientState.sessionId ? ' (我)' : ''}
+											</span>
+											<span className={classNames('member-audio')}>
+												<SpeakerIcon />
+											</span>
+										</div>
+									))
 								)}
 							</div>
+						</section>
+
+						<div className={classNames('voice-controls')}>
+							<button
+								className={classNames('voice-btn', clientState.voiceConnected && 'active')}
+								type="button"
+								onClick={() => void clientRef.current?.ensureVoice()}
+								disabled={loadingConfig || Boolean(configError)}
+								aria-pressed={clientState.voiceConnected}
+							>
+								<SpeakerIcon />
+								{clientState.voiceConnected ? '语音已启用' : '启用语音'}
+							</button>
+							<button
+								className={classNames('voice-btn', 'ghost', clientState.muted && 'active')}
+								type="button"
+								onClick={() => clientRef.current?.setMuted(!clientState.muted)}
+								disabled={!clientState.connected}
+								aria-pressed={clientState.muted}
+							>
+								<MicrophoneIcon />
+								{clientState.muted ? '取消静音' : '麦克风静音'}
+							</button>
+							<button
+								className={classNames('voice-btn', 'ghost', clientState.deafened && 'active')}
+								type="button"
+								onClick={() => clientRef.current?.setDeafened(!clientState.deafened)}
+								disabled={!clientState.connected}
+								aria-pressed={clientState.deafened}
+							>
+								<ChatIcon />
+								{clientState.deafened ? '取消耳聋' : '仅听文字'}
+							</button>
 						</div>
-					)}
+
+						{clientState.network && (
+							<details className={classNames('hint-card')}>
+								<summary>连接质量</summary>
+								<p>
+									{clientState.network.route === 'relay'
+										? 'MumDota TURN 中继'
+										: clientState.network.route === 'direct'
+											? '直连 MumDota'
+											: '正在检测链路'}
+									{clientState.network.protocol &&
+										` · ${clientState.network.protocol.toUpperCase()}`}
+									{clientState.network.rttMs !== null &&
+										` · 往返 ${Math.round(clientState.network.rttMs)} ms`}
+									{clientState.network.jitterMs !== null &&
+										` · 抖动 ${Math.round(clientState.network.jitterMs)} ms`}
+									{clientState.network.packetLossPercent !== null &&
+										` · 接收丢包 ${clientState.network.packetLossPercent.toFixed(1)}%`}
+								</p>
+							</details>
+						)}
+
+						{(clientState.audioPermission === 'denied' || clientState.playbackBlocked) && (
+							<div className={classNames('hint-card')}>
+								<p>
+									{clientState.audioPermission === 'denied'
+										? '浏览器阻止了麦克风访问，可以稍后手动重新授权。'
+										: '浏览器拦截了自动播放，点击下面按钮恢复远端声音。'}
+								</p>
+								<div className={classNames('hint-actions')}>
+									{clientState.audioPermission === 'denied' && (
+										<button
+											className={classNames('small-btn')}
+											type="button"
+											onClick={() => void clientRef.current?.ensureVoice()}
+										>
+											重新请求麦克风
+										</button>
+									)}
+									{clientState.playbackBlocked && (
+										<button
+											className={classNames('small-btn', 'ghost')}
+											type="button"
+											onClick={() => void clientRef.current?.resumeAudioPlayback()}
+										>
+											恢复声音播放
+										</button>
+									)}
+								</div>
+							</div>
+						)}
+					</div>
 
 					<div
 						className={classNames('message-list')}

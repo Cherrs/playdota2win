@@ -70,8 +70,6 @@ Configure the Worker secrets with `npx wrangler secret put <NAME>`:
 - `ADMIN_JWT_SECRET`
 - `DOWNLOAD_PASSWORD`
 - `TURNSTILE_SECRET_KEY`
-- `MUMBLE_PROXY_TURN_USERNAME`
-- `MUMBLE_PROXY_TURN_CREDENTIAL`
 
 `TURNSTILE_SITE_KEY` is public and can be configured as a normal Worker variable (an existing
 secret-text binding also works). `wrangler.jsonc` sets `keep_vars: true` so deploys do not remove
@@ -136,34 +134,41 @@ npx wrangler r2 bucket lifecycle add downloads abort-mirror-multipart \
 Do not apply an unscoped object-expiry rule to this bucket: it also contains canonical metadata and
 download files.
 
-## TURN deployment
+## MumDota voice and built-in TURN
 
-`mumble.yaml` uses coturn's long-term credential mechanism. The browser (through the Worker),
-coturn, and the mumdota WebRTC proxy must all use the same username and credential. Keep both
-values outside the repository; the manifest accepts only non-empty ASCII letters, digits, `.`,
-`_`, `~`, and `-`:
+The web application remains on Cloudflare Workers. The browser connects from the user's network to
+`MUMBLE_PROXY_WS_URL`, then uses direct WebRTC or MumDota's own TURN when direct ICE connectivity fails.
+MumDota handles both TURN and the Mumble bridge in one Rust process; no coturn deployment or external
+TURN provider is required.
 
-```bash
-umask 077
-printf '%s' 'playdota2win' > /secure/path/turn-username
-openssl rand -hex 32 | tr -d '\n' > /secure/path/turn-credential
-kubectl create namespace mumdota --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n mumdota create secret generic mumdota-secrets \
-  --from-file=turn-username=/secure/path/turn-username \
-  --from-file=turn-credential=/secure/path/turn-credential \
-  --dry-run=client -o yaml | kubectl apply -f -
-npx wrangler secret put MUMBLE_PROXY_TURN_USERNAME < /secure/path/turn-username
-npx wrangler secret put MUMBLE_PROXY_TURN_CREDENTIAL < /secure/path/turn-credential
-kubectl apply -f mumble.yaml
-kubectl -n mumdota rollout restart deployment/coturn deployment/mumdota
-kubectl -n mumdota rollout status deployment/coturn
-kubectl -n mumdota rollout status deployment/mumdota
-```
+The public Worker configuration returns an empty `iceServers` array. After Mumble authentication,
+MumDota protocol v2 sends per-session ICE credentials through WSS. The browser installs these,
+refreshes them before expiry and performs ICE restart. Credentials are never stored in Worker
+bindings or browser storage. Remove the obsolete `MUMBLE_PROXY_STUN_SERVERS`,
+`MUMBLE_PROXY_TURN_USERNAME` and `MUMBLE_PROXY_TURN_CREDENTIAL` bindings from the deployment.
 
-Also create `coturn-tls-secret` with a certificate valid for `turn.playdota2.win`. Rotate
-any credential that was previously committed before applying the new manifest.
+Configure `MUMBLE_PROXY_WS_URL=wss://voice.playdota2.win/ws` and
+`MUMBLE_PROXY_HEALTH_URL=https://voice.playdota2.win/ready`. The latter checks upstream TCP readiness;
+it does not prove that voice works. `/health` remains available as process liveness.
 
-Apply the Kubernetes Secret and manifest before deploying the Worker. The
-`MUMBLE_PROXY_TURN_SHARED_SECRET` and `MUMBLE_PROXY_TURN_TTL_SECONDS` settings are no longer used.
-The current manifest keeps `accept_invalid_certs = true` for compatibility with the deployed
-Mumble endpoint. Replace its certificate and switch this setting to `false` when possible.
+Deploy this frontend together with the corresponding MumDota protocol-v2 update. Cached old clients
+must refresh. MumDota initiates offers for initial voice and new speaker tracks; the browser answers.
+The client still understands old server answers for local development, but the production v2
+configuration intentionally supplies no old third-party ICE credentials.
+
+See [MumDota deployment and coturn migration](https://github.com/Cherrs/mumdota#readme) and its
+[one-process Kubernetes example](https://github.com/Cherrs/mumdota/blob/master/deploy/kubernetes.yaml)
+for public IP, ports, node affinity and certificate configuration. Both the direct media endpoint
+and TURN must reach the same MumDota instance. Use DNS-only for the TURN domain; to make WSS direct
+as well, use DNS-only for the voice domain. The main website domain can keep its Worker/CDN setup.
+
+The voice panel's **连接质量** details show the selected direct/relay route, transport, RTT, receive
+jitter and cumulative receive packet loss. Errors from a lost upstream Mumble session clear the
+connected state and trigger reconnection. ICE failure first refreshes credentials and restarts ICE;
+if recovery exceeds 15 seconds the client reconnects the entire session, retaining microphone access.
+
+For deployment acceptance, open the standalone `client.html` over HTTPS and test
+`?relay=1&turnTransport=udp`, `?relay=1&turnTransport=tcp` and `?relay=1&turnTransport=tls`.
+These options force each built-in TURN listener. Test two simultaneous speakers, Wi-Fi/mobile
+switching, upstream restart and a call longer than the credential TTL. Roll back both frontend and
+MumDota (and restore coturn) together if necessary.

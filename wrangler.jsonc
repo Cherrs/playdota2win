@@ -55,8 +55,7 @@
 		// Public Turnstile site key stays managed as a dashboard variable; keep_vars prevents
 		// Wrangler deployments from deleting it. Secrets remain managed with `wrangler secret`.
 		"MUMBLE_PROXY_WS_URL": "wss://voice.playdota2.win/ws",
-		"MUMBLE_PROXY_HEALTH_URL": "https://voice.playdota2.win/health",
-		"MUMBLE_PROXY_STUN_SERVERS": "stun:turn.playdota2.win:3478,turn:turn.playdota2.win:3478,turns:turn.playdota2.win:5349?transport=tcp"
+		"MUMBLE_PROXY_HEALTH_URL": "https://voice.playdota2.win/ready"
 	},
 	"routes": [
 		{

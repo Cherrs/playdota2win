@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 
 import { createMumbleClient } from './client.ts';
 
@@ -60,7 +60,29 @@ class FakeRTCPeerConnection {
 	oniceconnectionstatechange: (() => void) | null = null;
 	iceConnectionState: RTCIceConnectionState = 'new';
 
-	readonly config: RTCConfiguration;
+	config: RTCConfiguration;
+	remoteDescription: RTCSessionDescriptionInit | null = null;
+	candidates: RTCIceCandidateInit[] = [];
+	calls: string[] = [];
+
+	setConfiguration(config: RTCConfiguration): void {
+		this.config = config;
+	}
+	setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void> {
+		this.remoteDescription = description;
+		this.calls.push('remote');
+		return Promise.resolve();
+	}
+	addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+		assert.ok(this.remoteDescription, 'candidate arrived before SDP');
+		this.candidates.push(candidate);
+		this.calls.push('candidate');
+		return Promise.resolve();
+	}
+	createAnswer(): Promise<RTCSessionDescriptionInit> {
+		this.calls.push('answer');
+		return Promise.resolve({ type: 'answer', sdp: 'fake-answer-sdp' });
+	}
 
 	constructor(config: RTCConfiguration) {
 		this.config = config;
@@ -436,4 +458,159 @@ test('destroy stops a microphone stream that resolves after the client is gone',
 			value: originalNavigator
 		});
 	}
+});
+
+function setupV2Client(t: TestContext) {
+	const keys = ['WebSocket', 'RTCPeerConnection', 'Audio', 'navigator'] as const;
+	const originals = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
+	const track = new FakeMediaStreamTrack();
+	FakeWebSocket.instances = [];
+	FakeRTCPeerConnection.instances = [];
+	const values = [
+		FakeWebSocket,
+		FakeRTCPeerConnection,
+		FakeAudio,
+		{
+			mediaDevices: { getUserMedia: async () => new FakeMediaStream([track]) }
+		}
+	];
+	keys.forEach((key, index) =>
+		Object.defineProperty(globalThis, key, { configurable: true, value: values[index] })
+	);
+	const client = createMumbleClient({
+		config: { wsUrl: 'wss://voice.example.com/ws', iceServers: [], healthUrl: null },
+		nickname: 'v2',
+		autoReconnect: false
+	});
+	t.after(() => {
+		client.destroy();
+		keys.forEach((key, index) => {
+			const original = originals[index];
+			if (original) Object.defineProperty(globalThis, key, original);
+			else Reflect.deleteProperty(globalThis, key);
+		});
+	});
+	client.connect({ requestVoice: true });
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	const ice = {
+		ice_servers: [
+			{
+				urls: 'turn:voice.example.com:3478?transport=udp',
+				username: 'session-user',
+				credential: 'session-secret'
+			}
+		],
+		expires_at: Math.floor(Date.now() / 1000) + 300
+	};
+	socket.receive({
+		type: 'connected',
+		data: { protocol_version: 2, ice, session_id: 1, users: [], channels: [] }
+	});
+	return { client, socket, ice, track };
+}
+
+test('v2 uses session credentials and answers server offers after queued candidates', async (t) => {
+	const { socket, ice } = setupV2Client(t);
+	await flushAsyncWork();
+	const peer = FakeRTCPeerConnection.instances[0];
+	assert.deepEqual(peer.config.iceServers, ice.ice_servers);
+	assert.deepEqual(
+		socket.sent.map((message) => JSON.parse(message).type),
+		['connect', 'start_voice']
+	);
+	socket.receive({
+		type: 'ice_candidate',
+		data: { candidate: 'early', sdp_mid: '0', sdp_mline_index: 0 }
+	});
+	socket.receive({ type: 'offer', data: { sdp: 'server-offer' } });
+	socket.receive({
+		type: 'ice_candidate',
+		data: { candidate: 'late', sdp_mid: '0', sdp_mline_index: 0 }
+	});
+	await flushAsyncWork();
+	assert.deepEqual(peer.calls, ['remote', 'candidate', 'answer', 'candidate']);
+	assert.equal(JSON.parse(socket.sent.at(-1)!).type, 'answer');
+});
+
+test('upstream failure clears connected state even if WebSocket stays open', async (t) => {
+	const { client, socket, track } = setupV2Client(t);
+	await flushAsyncWork();
+	assert.equal(client.getSnapshot().connected, true);
+	socket.receive({
+		type: 'error',
+		data: { code: 'mumble_disconnected', message: 'upstream closed' }
+	});
+	await flushAsyncWork();
+	assert.equal(client.getSnapshot().connected, false);
+	assert.equal(client.getSnapshot().status, 'disconnected');
+	assert.equal(client.getSnapshot().sessionId, null);
+	assert.equal(socket.readyState, FakeWebSocket.CLOSING);
+	assert.equal(track.stopCalls, 0);
+});
+
+test('failed ICE refreshes credentials and restarts before reconnecting on timeout', async (t) => {
+	t.mock.timers.enable({ apis: ['setTimeout'] });
+	const { socket, client, ice } = setupV2Client(t);
+	await flushAsyncWork();
+	const peer = FakeRTCPeerConnection.instances[0];
+	peer.iceConnectionState = 'failed';
+	peer.oniceconnectionstatechange?.();
+	t.mock.timers.tick(1);
+	assert.equal(JSON.parse(socket.sent.at(-1)!).type, 'ice_refresh');
+	socket.receive({ type: 'ice_config', data: ice });
+	await flushAsyncWork();
+	assert.equal(JSON.parse(socket.sent.at(-1)!).type, 'ice_restart');
+	socket.receive({
+		type: 'error',
+		data: { code: 'webrtc_disconnected', message: 'same ICE failure reported by server' }
+	});
+	await flushAsyncWork();
+	t.mock.timers.tick(3000);
+	assert.equal(
+		client.getSnapshot().connected,
+		true,
+		'duplicate failure must not interrupt an ongoing restart'
+	);
+	t.mock.timers.tick(12000);
+	assert.equal(client.getSnapshot().connected, false);
+	assert.match(client.getSnapshot().errorMessage, /超时/);
+});
+
+test('credentials refresh before expiry and install rotated credentials for restart', async (t) => {
+	t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000000 });
+	const { socket, ice } = setupV2Client(t);
+	await flushAsyncWork();
+	const peer = FakeRTCPeerConnection.instances[0];
+	peer.iceConnectionState = 'connected';
+	peer.oniceconnectionstatechange?.();
+	t.mock.timers.tick(240000);
+	assert.equal(JSON.parse(socket.sent.at(-1)!).type, 'ice_refresh');
+	const rotated = {
+		ice_servers: [{ ...ice.ice_servers[0], username: 'rotated', credential: 'new-secret' }],
+		expires_at: 1540
+	};
+	socket.receive({ type: 'ice_config', data: rotated });
+	await flushAsyncWork();
+	assert.deepEqual(peer.config.iceServers, rotated.ice_servers);
+	assert.equal(JSON.parse(socket.sent.at(-1)!).type, 'ice_restart');
+});
+
+test('a WebSocket that never finishes connecting times out', (t) => {
+	t.mock.timers.enable({ apis: ['setTimeout'] });
+	const original = globalThis.WebSocket;
+	Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeWebSocket });
+	const client = createMumbleClient({
+		config: { wsUrl: 'wss://voice.example.com/ws', iceServers: [], healthUrl: null },
+		nickname: 'timeout',
+		autoReconnect: false
+	});
+	t.after(() => {
+		client.destroy();
+		Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: original });
+	});
+	client.connect();
+	t.mock.timers.tick(15000);
+	assert.equal(client.getSnapshot().status, 'disconnected');
+	assert.match(client.getSnapshot().errorMessage, /超时/);
 });

@@ -1,6 +1,7 @@
 import { json, type RequestHandler } from '../../http';
 import { requireAdminAuth } from '$lib/admin-auth';
 import type { ApiResponse, MumbleProxyHealth } from '$lib/types';
+import { isMumbleHealthy } from '$lib/server/mumble/health';
 import { getMumbleProxyHealthUrl } from '$lib/server/mumble/config';
 
 export const GET: RequestHandler = async ({ request, fetch, platform, url }) => {
@@ -24,14 +25,15 @@ export const GET: RequestHandler = async ({ request, fetch, platform, url }) => 
 
 	try {
 		const response = await fetch(healthUrl, {
-			headers: { Accept: 'text/plain' }
+			headers: { Accept: 'application/json, text/plain' },
+			signal: AbortSignal.timeout(5000)
 		});
 		const message = (await response.text()).trim() || response.statusText || 'unknown';
 
 		return json({
 			success: true,
 			data: {
-				healthy: response.ok && message.toLowerCase() === 'ok',
+				healthy: isMumbleHealthy(response.ok, message),
 				status: response.status,
 				message,
 				checkedAt,

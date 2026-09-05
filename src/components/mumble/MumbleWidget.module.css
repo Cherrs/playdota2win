@@ -60,6 +60,13 @@
 	backdrop-filter: blur(18px);
 }
 
+.session-controls {
+	min-height: 0;
+	flex: 0 1 auto;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+
 .mumble-header {
 	display: flex;
 	align-items: center;
@@ -665,6 +672,8 @@
 	.mumble-widget {
 		right: 12px;
 		bottom: 12px;
+		left: 12px;
+		max-width: none;
 	}
 
 	.mumble-toggle,
@@ -673,7 +682,7 @@
 	}
 
 	.mumble-panel {
-		width: calc(100vw - 24px);
+		width: 100%;
 		height: min(650px, calc(100vh - 24px));
 		min-height: 0;
 	}
