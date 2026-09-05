@@ -15,6 +15,7 @@ import {
 	type MumbleClientSnapshot
 } from '../../lib/mumble/client';
 import { buildChannelOptions } from '../../lib/mumble/utils';
+import { MUMBLE_WIDGET_OPEN_EVENT } from '../../lib/mumble/events';
 import { generateRandomNickname } from '../../lib/nickname';
 import type {
 	ApiResponse,
@@ -22,6 +23,7 @@ import type {
 	MumbleTextMessage,
 	NicknameKeywordList
 } from '../../lib/types';
+import MascotIcon from '../public/MascotIcon';
 import styles from './MumbleWidget.module.css';
 
 const NICKNAME_STORAGE_KEY = 'playdota2win_mumble_nickname';
@@ -63,6 +65,43 @@ function persistNickname(nickname: string): void {
 	}
 }
 
+function ShuffleIcon() {
+	return (
+		<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+			<path d="M3 5h2.2c3.8 0 3.8 8 7.6 8H15" />
+			<path d="m12.5 10.5 2.5 2.5-2.5 2.5M3 13h2.2c1.1 0 1.9-.7 2.6-1.7M10.2 6.7c.7-1 1.5-1.7 2.6-1.7H15" />
+			<path d="M12.5 2.5 15 5l-2.5 2.5" />
+		</svg>
+	);
+}
+
+function SpeakerIcon() {
+	return (
+		<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+			<path d="M3 7h3l4-3v10l-4-3H3Z" />
+			<path d="M12.5 6.5a4 4 0 0 1 0 5M14.5 4.5a6.8 6.8 0 0 1 0 9" />
+		</svg>
+	);
+}
+
+function MicrophoneIcon() {
+	return (
+		<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+			<rect x="6" y="2" width="6" height="9" rx="3" />
+			<path d="M3.8 8.5a5.2 5.2 0 0 0 10.4 0M9 13.8V16M6.5 16h5" />
+		</svg>
+	);
+}
+
+function ChatIcon() {
+	return (
+		<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+			<path d="M3 3.5h12v9H8l-3.5 2.5.7-2.5H3Z" />
+			<path d="M6 7h6M6 9.5h4" />
+		</svg>
+	);
+}
+
 export default function MumbleWidget() {
 	const [expanded, setExpanded] = useState(false);
 	const [pendingMessage, setPendingMessage] = useState('');
@@ -89,7 +128,7 @@ export default function MumbleWidget() {
 	const notificationUnsubscribeRef = useRef<(() => void) | null>(null);
 	const messagesRef = useRef<HTMLDivElement | null>(null);
 	const nicknameRef = useRef('');
-	const expandedRef = useRef(false);
+	const expandedRef = useRef(expanded);
 	const mountedRef = useRef(true);
 	const initializationRef = useRef<Promise<void> | null>(null);
 	const initializationControllerRef = useRef<AbortController | null>(null);
@@ -235,12 +274,30 @@ export default function MumbleWidget() {
 		}
 	}, [triggerNewMessageNotification]);
 
+	const expandWidget = useCallback(() => {
+		expandedRef.current = true;
+		setExpanded(true);
+		setUnreadCount(0);
+		setNewMessagePreview(null);
+		if (previewTimerRef.current) {
+			clearTimeout(previewTimerRef.current);
+			previewTimerRef.current = null;
+		}
+		void initializeClient();
+	}, [initializeClient]);
+
 	useEffect(() => {
 		mountedRef.current = true;
 		const newMessageTimers = newMessageTimersRef.current;
+		const handleOpenRequest = () => expandWidget();
+		window.addEventListener(MUMBLE_WIDGET_OPEN_EVENT, handleOpenRequest);
+		const startupTimer = expandedRef.current
+			? window.setTimeout(() => void initializeClient(), 0)
+			: null;
 		return () => {
 			mountedRef.current = false;
-			expandedRef.current = false;
+			window.removeEventListener(MUMBLE_WIDGET_OPEN_EVENT, handleOpenRequest);
+			if (startupTimer !== null) window.clearTimeout(startupTimer);
 			initializationControllerRef.current?.abort();
 			initializationControllerRef.current = null;
 			notificationUnsubscribeRef.current?.();
@@ -253,7 +310,7 @@ export default function MumbleWidget() {
 			for (const timer of newMessageTimers) clearTimeout(timer);
 			newMessageTimers.clear();
 		};
-	}, []);
+	}, [expandWidget, initializeClient]);
 
 	useEffect(() => {
 		if (!expanded || !messagesRef.current) return;
@@ -285,18 +342,6 @@ export default function MumbleWidget() {
 		statusText = '文字已连接，正在建立语音...';
 	} else if (clientState.connected) statusText = '文字已连接，等待语音可用';
 	else if (clientState.disconnectReason) statusText = clientState.disconnectReason;
-
-	function handleExpand(): void {
-		expandedRef.current = true;
-		setExpanded(true);
-		setUnreadCount(0);
-		setNewMessagePreview(null);
-		if (previewTimerRef.current) {
-			clearTimeout(previewTimerRef.current);
-			previewTimerRef.current = null;
-		}
-		void initializeClient();
-	}
 
 	function handleCollapse(): void {
 		expandedRef.current = false;
@@ -367,36 +412,45 @@ export default function MumbleWidget() {
 				>
 					<header className={classNames('mumble-header')}>
 						<div className={classNames('title-group')}>
+							<span className={classNames('panel-logo')} aria-hidden="true">
+								<MascotIcon className={classNames('panel-mascot')} />
+							</span>
 							<h2>Mumble 语音房</h2>
 							<span className={classNames('online-pill')}>
-								{loadingConfig ? '连接准备中' : `在线 ${clientState.onlineCount}`}
+								<span
+									className={classNames('online-dot', clientState.connected && 'active')}
+									aria-hidden="true"
+								/>
+								{loadingConfig
+									? '连接准备中'
+									: clientState.connected
+										? `在线 ${clientState.onlineCount}`
+										: '未连接'}
 							</span>
 						</div>
 
 						<div className={classNames('header-actions')}>
+							<button
+								className={classNames('icon-btn')}
+								type="button"
+								onClick={handleCollapse}
+								title="收起"
+								aria-label="收起 Mumble 窗口"
+							>
+								−
+							</button>
 							{clientState.connected ||
 							clientState.reconnecting ||
 							clientState.status === 'connecting' ? (
-								<>
-									<button
-										className={classNames('icon-btn', 'ghost')}
-										type="button"
-										onClick={handleReconnect}
-										title="重新连接"
-										aria-label="重新连接 Mumble"
-									>
-										↻
-									</button>
-									<button
-										className={classNames('icon-btn')}
-										type="button"
-										onClick={() => clientRef.current?.disconnect()}
-										title="断开连接"
-										aria-label="断开 Mumble 连接"
-									>
-										×
-									</button>
-								</>
+								<button
+									className={classNames('icon-btn')}
+									type="button"
+									onClick={() => clientRef.current?.disconnect()}
+									title="断开连接"
+									aria-label="断开 Mumble 连接"
+								>
+									×
+								</button>
 							) : (
 								<button
 									className={classNames('icon-btn')}
@@ -408,15 +462,6 @@ export default function MumbleWidget() {
 									⟳
 								</button>
 							)}
-							<button
-								className={classNames('icon-btn')}
-								type="button"
-								onClick={handleCollapse}
-								title="收起"
-								aria-label="收起 Mumble 窗口"
-							>
-								−
-							</button>
 						</div>
 					</header>
 
@@ -450,15 +495,16 @@ export default function MumbleWidget() {
 							</>
 						) : (
 							<>
-								<span className={classNames('nickname-label')}>昵称：{nickname}</span>
+								<span className={classNames('nickname-prefix')}>昵称：</span>
+								<strong className={classNames('nickname-label')}>{nickname || '准备中'}</strong>
 								<button
-									className={classNames('small-btn', 'ghost')}
+									className={classNames('small-btn', 'ghost', 'icon-only')}
 									type="button"
 									onClick={randomizeNickname}
 									title="随机昵称"
 									aria-label="生成随机昵称"
 								>
-									🎲
+									<ShuffleIcon />
 								</button>
 								<button
 									className={classNames('small-btn', 'ghost')}
@@ -556,25 +602,49 @@ export default function MumbleWidget() {
 								</select>
 
 								<div className={classNames('user-chips')}>
-									{currentChannelUsers.length === 0 ? (
+									{currentChannelUsers.filter((user) => user.sessionId === clientState.sessionId)
+										.length === 0 ? (
 										<span className={classNames('hint-chip')}>当前频道暂无成员</span>
 									) : (
-										currentChannelUsers.map((user) => (
-											<span
-												className={classNames(
-													'user-chip',
-													user.sessionId === clientState.sessionId && 'self'
-												)}
-												key={`${user.sessionId}-${user.name}`}
-											>
-												{user.name}
-											</span>
-										))
+										currentChannelUsers
+											.filter((user) => user.sessionId === clientState.sessionId)
+											.map((user) => (
+												<span
+													className={classNames('user-chip', 'self')}
+													key={`${user.sessionId}-${user.name}`}
+												>
+													{user.name}
+												</span>
+											))
 									)}
 								</div>
 							</div>
 						)}
 					</div>
+
+					<section className={classNames('members-section')} aria-label="当前频道成员">
+						<h3>
+							成员 <span>({currentChannelUsers.length})</span>
+						</h3>
+						<div className={classNames('member-list')}>
+							{currentChannelUsers.length === 0 ? (
+								<p className={classNames('members-empty')}>等待成员加入频道</p>
+							) : (
+								currentChannelUsers.map((user) => (
+									<div className={classNames('member-row')} key={user.sessionId}>
+										<span className={classNames('member-dot')} aria-hidden="true" />
+										<span className={classNames('member-name')}>
+											{user.name}
+											{user.sessionId === clientState.sessionId ? ' (我)' : ''}
+										</span>
+										<span className={classNames('member-audio')}>
+											<SpeakerIcon />
+										</span>
+									</div>
+								))
+							)}
+						</div>
+					</section>
 
 					<div className={classNames('voice-controls')}>
 						<button
@@ -584,6 +654,7 @@ export default function MumbleWidget() {
 							disabled={loadingConfig || Boolean(configError)}
 							aria-pressed={clientState.voiceConnected}
 						>
+							<SpeakerIcon />
 							{clientState.voiceConnected ? '语音已启用' : '启用语音'}
 						</button>
 						<button
@@ -593,6 +664,7 @@ export default function MumbleWidget() {
 							disabled={!clientState.connected}
 							aria-pressed={clientState.muted}
 						>
+							<MicrophoneIcon />
 							{clientState.muted ? '取消静音' : '麦克风静音'}
 						</button>
 						<button
@@ -602,6 +674,7 @@ export default function MumbleWidget() {
 							disabled={!clientState.connected}
 							aria-pressed={clientState.deafened}
 						>
+							<ChatIcon />
 							{clientState.deafened ? '取消耳聋' : '仅听文字'}
 						</button>
 					</div>
@@ -714,7 +787,7 @@ export default function MumbleWidget() {
 					<button
 						className={classNames('mumble-toggle', animateToggle && 'toggle-shake')}
 						type="button"
-						onClick={handleExpand}
+						onClick={expandWidget}
 						aria-expanded="false"
 						aria-controls={panelId}
 						aria-label={`打开 Mumble 聊天窗口，${client ? `在线 ${clientState.onlineCount}` : '按需连接'}${unreadCount > 0 ? `，${unreadCount > 99 ? '99 条以上' : `${unreadCount} 条`}未读消息` : ''}`}

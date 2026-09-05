@@ -8,6 +8,7 @@ import {
 	useState
 } from 'react';
 import type { ApiResponse, Category, PublicDownloadItem } from '$lib/types';
+import { MUMBLE_WIDGET_OPEN_EVENT } from '$lib/mumble/events';
 import { publicHomeDataLoader } from '$lib/public-home-data';
 import { preloadTurnstileScript } from '$lib/utils/turnstile-client';
 import AnnouncementList from '../components/public/AnnouncementList';
@@ -18,6 +19,7 @@ import GuideModal from '../components/public/GuideModal';
 import GuidePanel from '../components/public/GuidePanel';
 import MascotAnimation from '../components/public/MascotAnimation';
 import PasswordModal from '../components/public/PasswordModal';
+import SiteHeader from '../components/public/SiteHeader';
 import styles from './DownloadPage.module.css';
 
 interface TurnstileResponseState {
@@ -59,6 +61,8 @@ export default function DownloadPage() {
 	const [requireTurnstile, setRequireTurnstile] = useState(false);
 	const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
 	const guideCacheRef = useRef<Record<string, string>>({});
+	const pageTopRef = useRef<HTMLElement>(null);
+	const downloadSectionRef = useRef<HTMLDivElement>(null);
 	const categoriesRequestRef = useRef<AbortController | null>(null);
 	const downloadsRequestRef = useRef<AbortController | null>(null);
 	const downloadTabRef = useRef<HTMLButtonElement>(null);
@@ -285,6 +289,26 @@ export default function DownloadPage() {
 		(nextTab === 'download' ? downloadTabRef : guideTabRef).current?.focus();
 	};
 
+	const scrollToSection = (element: HTMLElement | null) => {
+		if (!element) return;
+		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		element.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+	};
+
+	const handleHomeNavigation = () => {
+		setActiveTab('download');
+		scrollToSection(pageTopRef.current);
+	};
+
+	const handleGuideNavigation = () => {
+		setActiveTab('guide');
+		requestAnimationFrame(() => scrollToSection(downloadSectionRef.current));
+	};
+
+	const handleCommunityNavigation = () => {
+		window.dispatchEvent(new Event(MUMBLE_WIDGET_OPEN_EVENT));
+	};
+
 	return (
 		<>
 			<link rel="preconnect" href="https://challenges.cloudflare.com" />
@@ -302,22 +326,34 @@ export default function DownloadPage() {
 
 			<div className={styles['page-container']}>
 				<BackgroundDecorations />
-				<main className={styles['main-content']}>
-					<MascotAnimation />
-					<div className={styles['title-section']}>
-						<h1 className={styles['main-title']}>
-							<span className="title-text">PlayDota2Win</span>
-							<span className={styles['title-emoji']} aria-hidden="true">
-								🎮
-							</span>
-						</h1>
-						<p className={styles.subtitle}>下载下载下载</p>
-						<div className={styles['download-stats']}>
-							<span className="stats-text">
-								已有 <strong>{downloadCount.toLocaleString()}</strong> 位小伙伴下载
-							</span>
+				<SiteHeader
+					activeSection={activeTab}
+					onHome={handleHomeNavigation}
+					onGuide={handleGuideNavigation}
+					onCommunity={handleCommunityNavigation}
+				/>
+				<main className={styles['main-content']} ref={pageTopRef}>
+					<section className={styles['hero-section']} aria-labelledby="download-page-title">
+						<MascotAnimation />
+						<div className={styles['title-section']}>
+							<h1 className={styles['main-title']} id="download-page-title">
+								PlayDota2Win
+							</h1>
+							<div className={styles['subtitle-row']}>
+								<span className={styles['subtitle-accent']} aria-hidden="true" />
+								<p className={styles.subtitle}>下载中心</p>
+								<span
+									className={`${styles['subtitle-accent']} ${styles.reverse}`}
+									aria-hidden="true"
+								/>
+							</div>
+							<div className={styles['download-stats']}>
+								<span>
+									已有 <strong>{downloadCount.toLocaleString()}</strong> 位小伙伴下载
+								</span>
+							</div>
 						</div>
-					</div>
+					</section>
 
 					<CategoryTabs
 						categories={categories}
@@ -325,100 +361,105 @@ export default function DownloadPage() {
 						selectedCategoryId={selectedCategoryId}
 						onSelect={setSelectedCategoryId}
 					/>
-					<AnnouncementList />
+					<div className={styles['content-lane']}>
+						<AnnouncementList />
 
-					<div className={styles['download-section']}>
-						<div className={styles['tab-bar']} role="tablist">
-							<button
-								className={`${styles['tab-btn']} ${activeTab === 'download' ? styles.active : ''}`}
-								type="button"
-								role="tab"
-								id={downloadTabId}
-								ref={downloadTabRef}
-								aria-selected={activeTab === 'download'}
-								aria-controls={downloadPanelId}
-								tabIndex={activeTab === 'download' ? 0 : -1}
-								onClick={() => setActiveTab('download')}
-								onKeyDown={(event) => handleTabKeyDown(event, 'download')}
-							>
-								下载
-							</button>
-							<button
-								className={`${styles['tab-btn']} ${activeTab === 'guide' ? styles.active : ''}`}
-								type="button"
-								role="tab"
-								id={guideTabId}
-								ref={guideTabRef}
-								aria-selected={activeTab === 'guide'}
-								aria-controls={guidePanelId}
-								tabIndex={activeTab === 'guide' ? 0 : -1}
-								onClick={() => setActiveTab('guide')}
-								onKeyDown={(event) => handleTabKeyDown(event, 'guide')}
-							>
-								配置指引
-							</button>
-						</div>
+						<div className={styles['download-section']} ref={downloadSectionRef}>
+							<div className={styles['tab-bar']} role="tablist">
+								<button
+									className={`${styles['tab-btn']} ${activeTab === 'download' ? styles.active : ''}`}
+									type="button"
+									role="tab"
+									id={downloadTabId}
+									ref={downloadTabRef}
+									aria-selected={activeTab === 'download'}
+									aria-controls={downloadPanelId}
+									tabIndex={activeTab === 'download' ? 0 : -1}
+									onClick={() => setActiveTab('download')}
+									onKeyDown={(event) => handleTabKeyDown(event, 'download')}
+								>
+									下载
+								</button>
+								<button
+									className={`${styles['tab-btn']} ${activeTab === 'guide' ? styles.active : ''}`}
+									type="button"
+									role="tab"
+									id={guideTabId}
+									ref={guideTabRef}
+									aria-selected={activeTab === 'guide'}
+									aria-controls={guidePanelId}
+									tabIndex={activeTab === 'guide' ? 0 : -1}
+									onClick={() => setActiveTab('guide')}
+									onKeyDown={(event) => handleTabKeyDown(event, 'guide')}
+								>
+									配置指引
+								</button>
+							</div>
 
-						<div
-							className={styles.tabpanel}
-							role="tabpanel"
-							id={downloadPanelId}
-							aria-labelledby={downloadTabId}
-							hidden={activeTab !== 'download'}
-							tabIndex={0}
-						>
-							{loading ? (
-								<div className={styles['loading-downloads']} role="status" aria-live="polite">
-									<div className={styles.spinner} aria-hidden="true" />
-									<span>加载中...</span>
+							<div className={styles['panel-stack']}>
+								<div
+									className={`${styles.tabpanel} ${activeTab !== 'download' ? styles.inactive : ''}`}
+									role="tabpanel"
+									id={downloadPanelId}
+									aria-labelledby={downloadTabId}
+									aria-hidden={activeTab !== 'download'}
+									inert={activeTab !== 'download'}
+									tabIndex={activeTab === 'download' ? 0 : -1}
+								>
+									{loading ? (
+										<div className={styles['loading-downloads']} role="status" aria-live="polite">
+											<div className={styles.spinner} aria-hidden="true" />
+											<span>加载中...</span>
+										</div>
+									) : loadError ? (
+										<div className={styles['no-downloads']} role="alert">
+											<span aria-hidden="true">⚠️</span>
+											<p>下载列表加载失败</p>
+											<p className={styles.hint}>{loadError}</p>
+											<button
+												className={styles['retry-btn']}
+												type="button"
+												onClick={() => void loadDownloads({ force: true })}
+											>
+												重新加载
+											</button>
+										</div>
+									) : downloads.length === 0 ? (
+										<div className={styles['no-downloads']}>
+											<span aria-hidden="true">📦</span>
+											<p>暂无可用的下载</p>
+											<p className={styles.hint}>请稍后再来看看～</p>
+										</div>
+									) : filteredDownloads.length === 0 ? (
+										<div className={styles['no-downloads']}>
+											<span aria-hidden="true">🔍</span>
+											<p>该分类暂无下载</p>
+											<p className={styles.hint}>试试其他分类吧～</p>
+										</div>
+									) : (
+										<div className={styles['download-list']}>
+											{filteredDownloads.map((item) => (
+												<DownloadCard
+													key={item.id}
+													item={item}
+													downloading={downloading}
+													onDownload={setPendingItem}
+													onGuide={openGuideModal}
+												/>
+											))}
+										</div>
+									)}
 								</div>
-							) : loadError ? (
-								<div className={styles['no-downloads']} role="alert">
-									<span aria-hidden="true">⚠️</span>
-									<p>下载列表加载失败</p>
-									<p className={styles.hint}>{loadError}</p>
-									<button
-										className={styles['retry-btn']}
-										type="button"
-										onClick={() => void loadDownloads({ force: true })}
-									>
-										重新加载
-									</button>
-								</div>
-							) : downloads.length === 0 ? (
-								<div className={styles['no-downloads']}>
-									<span aria-hidden="true">📦</span>
-									<p>暂无可用的下载</p>
-									<p className={styles.hint}>请稍后再来看看～</p>
-								</div>
-							) : filteredDownloads.length === 0 ? (
-								<div className={styles['no-downloads']}>
-									<span aria-hidden="true">🔍</span>
-									<p>该分类暂无下载</p>
-									<p className={styles.hint}>试试其他分类吧～</p>
-								</div>
-							) : (
-								<div className={styles['download-list']}>
-									{filteredDownloads.map((item) => (
-										<DownloadCard
-											key={item.id}
-											item={item}
-											downloading={downloading}
-											onDownload={setPendingItem}
-											onGuide={openGuideModal}
-										/>
-									))}
-								</div>
-							)}
+								<GuidePanel
+									item={selectedItem}
+									configGuide={selectedConfigGuide}
+									message={guideMessage}
+									id={guidePanelId}
+									labelledBy={guideTabId}
+									hidden={activeTab !== 'guide'}
+								/>
+							</div>
 						</div>
-						<GuidePanel
-							item={selectedItem}
-							configGuide={selectedConfigGuide}
-							message={guideMessage}
-							id={guidePanelId}
-							labelledBy={guideTabId}
-							hidden={activeTab !== 'guide'}
-						/>
 					</div>
 
 					{pendingItem ? (

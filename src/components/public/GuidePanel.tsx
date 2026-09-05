@@ -58,12 +58,13 @@ export default function GuidePanel({
 
 	return (
 		<div
-			className={styles['guide-panel']}
+			className={`${styles['guide-panel']} ${hidden ? styles.inactive : ''}`}
 			role="tabpanel"
 			id={id}
 			aria-labelledby={labelledBy}
-			hidden={hidden}
-			tabIndex={0}
+			aria-hidden={hidden}
+			inert={hidden}
+			tabIndex={hidden ? -1 : 0}
 		>
 			<div className={styles['guide-header']}>
 				<h3>配置指引</h3>

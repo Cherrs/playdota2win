@@ -1,5 +1,5 @@
 .mascot-area {
-	margin-bottom: 1rem;
+	margin: 0;
 }
 
 .mascot-container {
@@ -8,8 +8,8 @@
 }
 
 .mascot {
-	width: 140px;
-	height: 140px;
+	width: 112px;
+	height: 112px;
 	transition: transform 0.3s ease;
 }
 
@@ -20,16 +20,16 @@
 .mascot-svg {
 	width: 100%;
 	height: 100%;
-	filter: drop-shadow(0 10px 20px rgba(255, 182, 193, 0.4));
+	filter: drop-shadow(0 8px 11px rgba(104, 74, 122, 0.16));
 }
 
 .sparkles {
 	position: absolute;
-	top: -10px;
+	top: 4px;
 	left: 50%;
 	transform: translateX(-50%);
 	display: flex;
-	gap: 0.5rem;
+	gap: 64px;
 	opacity: 0;
 	transition: opacity 0.3s ease;
 }
@@ -39,6 +39,12 @@
 }
 
 .sparkle {
+	display: block;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #f4b5c4;
+	box-shadow: 0 0 0 4px rgba(244, 181, 196, 0.18);
 	animation: sparkle 1s ease-in-out infinite;
 }
 

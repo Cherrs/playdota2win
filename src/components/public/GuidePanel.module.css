@@ -8,8 +8,9 @@
 	gap: 1rem;
 }
 
-.guide-panel[hidden] {
-	display: none;
+.guide-panel.inactive {
+	visibility: hidden;
+	pointer-events: none;
 }
 
 .guide-header h3 {

@@ -5,8 +5,9 @@ import { PUBLIC_SHELL_HTML, shouldPrerenderPublicShell } from './public-shell.ts
 
 test('public shell contains visible title, navigation and card placeholders', () => {
 	assert.match(PUBLIC_SHELL_HTML, /<h1>PlayDota2Win/u);
+	assert.match(PUBLIC_SHELL_HTML, /aria-label="主导航"/u);
 	assert.match(PUBLIC_SHELL_HTML, /aria-label="下载分类"/u);
-	assert.equal(PUBLIC_SHELL_HTML.match(/class="initial-shell__card"/gu)?.length, 2);
+	assert.equal(PUBLIC_SHELL_HTML.match(/class="initial-shell__card"/gu)?.length, 3);
 });
 
 test('prerenders only GET responses for public HTML routes', () => {
