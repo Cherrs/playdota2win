@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import test from 'node:test';
 
 import { signJwt, verifyJwt } from './jwt.ts';
@@ -20,13 +21,17 @@ test('accepts a valid, strictly shaped admin JWT', async () => {
 
 test('rejects tampered signatures and algorithm confusion', async () => {
 	const token = await signJwt(claims(), SECRET);
-	assert.equal((await verifyJwt(`${token.slice(0, -1)}x`, SECRET)).valid, false);
+	const [header, payload, signature] = token.split('.');
+	// Changing base64url padding bits can leave the decoded signature unchanged.
+	const tamperedSignature = Buffer.from(signature, 'base64url');
+	tamperedSignature[0] ^= 1;
+	const tamperedToken = `${header}.${payload}.${tamperedSignature.toString('base64url')}`;
+	assert.equal((await verifyJwt(tamperedToken, SECRET)).valid, false);
 
 	const noneHeader = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
 		.replace(/=/g, '')
 		.replace(/\+/g, '-')
 		.replace(/\//g, '_');
-	const [, payload, signature] = token.split('.');
 	assert.equal((await verifyJwt(`${noneHeader}.${payload}.${signature}`, SECRET)).valid, false);
 });
 
